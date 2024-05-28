@@ -52,3 +52,10 @@ pub fn add_btreemap<E: Ord, T: Copy + std::ops::AddAssign>(
     });
     m1
 }
+
+/// A trait which indicates that it is possible to acquire a "placeholder" value
+/// of a type, which can be used for test purposes.
+pub trait Placeholder {
+    /// Gets a dummy value of this type which can be used for test purposes.
+    fn placeholder() -> Self;
+}

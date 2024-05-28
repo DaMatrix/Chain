@@ -21,14 +21,18 @@ pub struct ReceiverInfo {
 ///
 /// * `script` - Script to build address for
 pub fn construct_p2sh_address(script: &Script) -> String {
-    let bytes = match serialize(script) {
-        Ok(bytes) => bytes,
-        Err(_) => vec![],
-    };
-    let mut addr = hex::encode(sha3_256::digest(&bytes));
-    addr.insert(ZERO, P2SH_PREPEND as char);
-    addr.truncate(STANDARD_ADDRESS_LENGTH);
-    addr
+    let script_signable_string = script.stack.iter()
+        .map(|entry| match entry {
+            StackEntry::Op(op) => op.to_string(),
+            StackEntry::Signature(sig) => hex::encode(sig.as_ref()),
+            StackEntry::PubKey(pubkey) => hex::encode(pubkey.as_ref()),
+            StackEntry::Bytes(bytes) => hex::encode(bytes),
+            StackEntry::Num(n) => n.to_string(),
+        })
+        .collect::<Vec<String>>()
+        .join("\n");
+
+    hex::encode(sha3_256::digest(script_signable_string.as_bytes()))
 }
 
 /// Builds an address from a public key

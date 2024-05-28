@@ -248,18 +248,68 @@ pub mod pbkdf2 {
 }
 
 pub mod sha3_256 {
+    use std::convert::TryInto;
+    use std::fmt::{Display, Formatter};
+    use std::ops::Deref;
+    use std::str::FromStr;
+
     pub use sha3::digest::Output;
     pub use sha3::Digest;
     pub use sha3::Sha3_256;
 
-    pub fn digest(data: &[u8]) -> Output<Sha3_256> {
-        Sha3_256::digest(data)
+    pub const HASH_LEN : usize = 256 / 8;
+
+    #[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq)]
+    pub struct Hash(
+        [u8; HASH_LEN],
+    );
+
+    impl Hash {
+        pub fn from_slice(slice: &[u8]) -> Option<Self> {
+            Some(Self(slice.try_into().ok()?))
+        }
     }
 
-    pub fn digest_all<'a>(data: impl Iterator<Item = &'a [u8]>) -> Output<Sha3_256> {
+    impl Display for Hash {
+        fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+            f.write_str(&hex::encode(&self.0))
+        }
+    }
+
+    impl FromStr for Hash {
+        type Err = hex::FromHexError;
+
+        fn from_str(s: &str) -> Result<Self, Self::Err> {
+            let mut buf = [0u8; HASH_LEN];
+            match hex::decode_to_slice(s, &mut buf) {
+                Ok(_) => Ok(Self(buf)),
+                Err(e) => Err(e),
+            }
+        }
+    }
+
+    impl AsRef<[u8]> for Hash {
+        fn as_ref(&self) -> &[u8] {
+            &self.0
+        }
+    }
+
+    impl Deref for Hash {
+        type Target = [u8; HASH_LEN];
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    pub fn digest(data: &[u8]) -> Hash {
+        Hash(Sha3_256::digest(data).try_into().unwrap())
+    }
+
+    pub fn digest_all<'a>(data: impl Iterator<Item = &'a [u8]>) -> Hash {
         let mut hasher = Sha3_256::new();
         data.for_each(|v| hasher.update(v));
-        hasher.finalize()
+        Hash(hasher.finalize().try_into().unwrap())
     }
 }
 

@@ -5,7 +5,9 @@ pub const MAX_METADATA_BYTES: usize = 800;
 pub const TX_HASH_LENGTH: usize = 32;
 
 /*------- ADDRESS CONSTANTS -------*/
-pub const STANDARD_ADDRESS_LENGTH: usize = 64;
+//TODO: remove these two
+pub const STANDARD_ADDRESS_LENGTH_BYTES: usize = crate::primitives::address::STANDARD_ADDRESS_BYTES;
+pub const STANDARD_ADDRESS_LENGTH: usize = STANDARD_ADDRESS_LENGTH_BYTES * 2;
 // Prepending character for a P2SH address
 pub const P2SH_PREPEND: u8 = b'H';
 

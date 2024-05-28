@@ -70,6 +70,12 @@ impl<const N: usize> From<[u8; N]> for FixedByteArray<N> {
     }
 }
 
+impl<const N: usize> From<&[u8; N]> for FixedByteArray<N> {
+    fn from(value: &[u8; N]) -> Self {
+        Self(*value)
+    }
+}
+
 impl<const N: usize> TryFrom<&[u8]> for FixedByteArray<N> {
     type Error = std::array::TryFromSliceError;
 
