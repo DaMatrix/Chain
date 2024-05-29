@@ -1,9 +1,42 @@
 pub use ring;
-use std::convert::TryInto;
 use tracing::warn;
+use crate::utils::serialize_utils::FixedByteArray;
+
+macro_rules! fixed_bytes_wrapper {
+    ($vis:vis struct $name:ident, $n:expr, $doc:literal) => {
+        #[doc = $doc]
+        #[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
+        $vis struct $name(crate::utils::serialize_utils::FixedByteArray<$n>);
+
+        impl $name {
+            pub fn from_slice(slice: &[u8]) -> Option<Self> {
+                Some(Self(slice.try_into().ok()?))
+            }
+        }
+
+        impl AsRef<[u8]> for $name {
+            fn as_ref(&self) -> &[u8] {
+                self.0.as_ref()
+            }
+        }
+
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                std::fmt::Display::fmt(&self.0, f)
+            }
+        }
+
+        impl std::str::FromStr for $name {
+            type Err = <crate::utils::serialize_utils::FixedByteArray<$n> as std::str::FromStr>::Err;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                <crate::utils::serialize_utils::FixedByteArray<$n> as std::str::FromStr>::from_str(s).map(Self)
+            }
+        }
+    };
+}
 
 pub mod sign_ed25519 {
-    use super::deserialize_slice;
     pub use ring::signature::Ed25519KeyPair as SecretKeyBase;
     use ring::signature::KeyPair;
     pub use ring::signature::Signature as SignatureBase;
@@ -21,53 +54,14 @@ pub mod sign_ed25519 {
     const SIGNATURE_LEN: usize = ELEM_LEN + SCALAR_LEN;
     pub const ED25519_SIGNATURE_LEN: usize = SIGNATURE_LEN;
 
-    /// Signature data
-    /// We used sodiumoxide serialization before (treated it as slice with 64 bit length prefix).
-    #[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
-    pub struct Signature(
-        #[serde(serialize_with = "<[_]>::serialize")]
-        #[serde(deserialize_with = "deserialize_slice")]
-        [u8; ED25519_SIGNATURE_LEN],
-    );
-
-    impl Signature {
-        pub fn from_slice(slice: &[u8]) -> Option<Self> {
-            Some(Self(slice.try_into().ok()?))
-        }
-    }
-
-    impl AsRef<[u8]> for Signature {
-        fn as_ref(&self) -> &[u8] {
-            self.0.as_ref()
-        }
-    }
-
-    /// Public key data
-    /// We used sodiumoxide serialization before (treated it as slice with 64 bit length prefix).
-    #[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
-    pub struct PublicKey(
-        #[serde(serialize_with = "<[_]>::serialize")]
-        #[serde(deserialize_with = "deserialize_slice")]
-        [u8; ED25519_PUBLIC_KEY_LEN],
-    );
-
-    impl PublicKey {
-        pub fn from_slice(slice: &[u8]) -> Option<Self> {
-            Some(Self(slice.try_into().ok()?))
-        }
-    }
-
-    impl AsRef<[u8]> for PublicKey {
-        fn as_ref(&self) -> &[u8] {
-            self.0.as_ref()
-        }
-    }
+    fixed_bytes_wrapper!(pub struct Signature, ED25519_SIGNATURE_LEN, "Signature data");
+    fixed_bytes_wrapper!(pub struct PublicKey, ED25519_PUBLIC_KEY_LEN, "Public key data");
 
     /// PKCS8 encoded secret key pair
     /// We used sodiumoxide serialization before (treated it as slice with 64 bit length prefix).
     /// Slice and vector are serialized the same.
     #[derive(Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
-    pub struct SecretKey(Vec<u8>);
+    pub struct SecretKey(#[serde(with = "crate::utils::serialize_utils::vec_codec")] Vec<u8>);
 
     impl SecretKey {
         pub fn from_slice(slice: &[u8]) -> Option<Self> {
@@ -91,7 +85,7 @@ pub mod sign_ed25519 {
             Ok(secret) => secret,
             Err(_) => {
                 warn!("Invalid secret key");
-                return Signature([0; ED25519_SIGNATURE_LEN]);
+                return Signature([0; ED25519_SIGNATURE_LEN].into());
             }
         };
 
@@ -99,7 +93,7 @@ pub mod sign_ed25519 {
             Ok(signature) => signature,
             Err(_) => {
                 warn!("Invalid signature");
-                return Signature([0; ED25519_SIGNATURE_LEN]);
+                return Signature([0; ED25519_SIGNATURE_LEN].into());
             }
         };
         Signature(signature)
@@ -135,7 +129,7 @@ pub mod sign_ed25519 {
             Ok(pkcs8) => pkcs8,
             Err(_) => {
                 warn!("Failed to generate secret key base for pkcs8");
-                return (PublicKey([0; ED25519_PUBLIC_KEY_LEN]), SecretKey(vec![]));
+                return (PublicKey([0; ED25519_PUBLIC_KEY_LEN].into()), SecretKey(vec![]));
             }
         };
 
@@ -143,7 +137,7 @@ pub mod sign_ed25519 {
             Ok(secret) => secret,
             Err(_) => {
                 warn!("Invalid secret key base");
-                return (PublicKey([0; ED25519_PUBLIC_KEY_LEN]), SecretKey(vec![]));
+                return (PublicKey([0; ED25519_PUBLIC_KEY_LEN].into()), SecretKey(vec![]));
             }
         };
 
@@ -151,7 +145,7 @@ pub mod sign_ed25519 {
             Ok(pub_key_gen) => pub_key_gen,
             Err(_) => {
                 warn!("Invalid public key generation");
-                return (PublicKey([0; ED25519_PUBLIC_KEY_LEN]), SecretKey(vec![]));
+                return (PublicKey([0; ED25519_PUBLIC_KEY_LEN].into()), SecretKey(vec![]));
             }
         };
         let public = PublicKey(pub_key_gen);
@@ -159,7 +153,7 @@ pub mod sign_ed25519 {
             Some(secret) => secret,
             None => {
                 warn!("Invalid secret key");
-                return (PublicKey([0; ED25519_PUBLIC_KEY_LEN]), SecretKey(vec![]));
+                return (PublicKey([0; ED25519_PUBLIC_KEY_LEN].into()), SecretKey(vec![]));
             }
         };
 
@@ -169,7 +163,7 @@ pub mod sign_ed25519 {
 
 pub mod secretbox_chacha20_poly1305 {
     // Use key and nonce separately like rust-tls does
-    use super::{deserialize_slice, generate_random};
+    use super::generate_random;
     pub use ring::aead::LessSafeKey as KeyBase;
     pub use ring::aead::Nonce as NonceBase;
     pub use ring::aead::NONCE_LEN;
@@ -179,45 +173,8 @@ pub mod secretbox_chacha20_poly1305 {
 
     pub const KEY_LEN: usize = 256 / 8;
 
-    /// key data
-    #[derive(Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
-    pub struct Key(
-        #[serde(serialize_with = "<[_]>::serialize")]
-        #[serde(deserialize_with = "deserialize_slice")]
-        [u8; KEY_LEN],
-    );
-
-    impl Key {
-        pub fn from_slice(slice: &[u8]) -> Option<Self> {
-            Some(Self(slice.try_into().ok()?))
-        }
-    }
-
-    impl AsRef<[u8]> for Key {
-        fn as_ref(&self) -> &[u8] {
-            self.0.as_ref()
-        }
-    }
-
-    /// Nonce data
-    #[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
-    pub struct Nonce(
-        #[serde(serialize_with = "<[_]>::serialize")]
-        #[serde(deserialize_with = "deserialize_slice")]
-        [u8; NONCE_LEN],
-    );
-
-    impl Nonce {
-        pub fn from_slice(slice: &[u8]) -> Option<Self> {
-            Some(Self(slice.try_into().ok()?))
-        }
-    }
-
-    impl AsRef<[u8]> for Nonce {
-        fn as_ref(&self) -> &[u8] {
-            self.0.as_ref()
-        }
-    }
+    fixed_bytes_wrapper!(pub struct Key, KEY_LEN, "Key data");
+    fixed_bytes_wrapper!(pub struct Nonce, NONCE_LEN, "Nonce data");
 
     pub fn seal(mut plain_text: Vec<u8>, nonce: &Nonce, key: &Key) -> Option<Vec<u8>> {
         let key = get_keybase(key)?;
@@ -249,7 +206,7 @@ pub mod secretbox_chacha20_poly1305 {
     }
 
     fn get_noncebase(nonce: &Nonce) -> NonceBase {
-        NonceBase::assume_unique_for_key(nonce.0)
+        NonceBase::assume_unique_for_key(*nonce.0)
     }
 
     pub fn gen_key() -> Key {
@@ -262,7 +219,7 @@ pub mod secretbox_chacha20_poly1305 {
 }
 
 pub mod pbkdf2 {
-    use super::{deserialize_slice, generate_random};
+    use super::generate_random;
     use ring::pbkdf2::{derive, PBKDF2_HMAC_SHA256};
     use serde::{Deserialize, Serialize};
     use std::convert::TryInto;
@@ -272,24 +229,7 @@ pub mod pbkdf2 {
     pub const SALT_LEN: usize = 256 / 8;
     pub const OPSLIMIT_INTERACTIVE: u32 = 100_000;
 
-    #[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
-    pub struct Salt(
-        #[serde(serialize_with = "<[_]>::serialize")]
-        #[serde(deserialize_with = "deserialize_slice")]
-        [u8; SALT_LEN],
-    );
-
-    impl Salt {
-        pub fn from_slice(slice: &[u8]) -> Option<Self> {
-            Some(Self(slice.try_into().ok()?))
-        }
-    }
-
-    impl AsRef<[u8]> for Salt {
-        fn as_ref(&self) -> &[u8] {
-            self.0.as_ref()
-        }
-    }
+    fixed_bytes_wrapper!(pub struct Salt, SALT_LEN, "Salt data");
 
     pub fn derive_key(key: &mut [u8], passwd: &[u8], salt: &Salt, iterations: u32) {
         let iterations = match NonZeroU32::new(iterations) {
@@ -323,16 +263,7 @@ pub mod sha3_256 {
     }
 }
 
-fn deserialize_slice<'de, D: serde::Deserializer<'de>, const N: usize>(
-    deserializer: D,
-) -> Result<[u8; N], D::Error> {
-    let value: &[u8] = serde::Deserialize::deserialize(deserializer)?;
-    value
-        .try_into()
-        .map_err(|_| serde::de::Error::custom("Invalid array in deserialization".to_string()))
-}
-
-pub fn generate_random<const N: usize>() -> [u8; N] {
+fn generate_random<const N: usize>() -> FixedByteArray<N> {
     let mut value: [u8; N] = [0; N];
 
     use ring::rand::SecureRandom;
@@ -342,5 +273,5 @@ pub fn generate_random<const N: usize>() -> [u8; N] {
         Err(_) => warn!("Failed to generate random bytes"),
     };
 
-    value
+    FixedByteArray::new(value)
 }
