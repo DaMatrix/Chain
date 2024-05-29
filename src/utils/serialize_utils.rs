@@ -1,7 +1,9 @@
 use std::any::TypeId;
-use std::convert::TryFrom;
-use std::fmt::Formatter;
+use std::convert::{TryFrom, TryInto};
+use std::fmt;
 use std::marker::PhantomData;
+use std::ops::{Deref, DerefMut};
+use std::str::FromStr;
 
 use bincode::config::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -18,6 +20,104 @@ pub fn bincode_compact() -> WithOtherTrailing<WithOtherIntEncoding<DefaultOption
     DefaultOptions::new()
         .with_varint_encoding()
         .reject_trailing_bytes()
+}
+
+/// Simple wrapper around a fixed-length byte array.
+///
+/// This can be formatted to and parsed from a hexadecimal string using `Display` and `FromStr`.
+/// When serialized as JSON, it is also represented as a hexadecimal string.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct FixedByteArray<const N: usize>(
+    #[serde(with = "fixed_array_codec")]
+    [u8; N],
+);
+
+impl<const N: usize> FixedByteArray<N> {
+    pub fn new(arr: [u8; N]) -> Self {
+        Self(arr)
+    }
+}
+
+impl<const N: usize> AsRef<[u8]> for FixedByteArray<N> {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl<const N: usize> AsMut<[u8]> for FixedByteArray<N> {
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut self.0
+    }
+}
+
+impl<const N: usize> Deref for FixedByteArray<N> {
+    type Target = [u8; N];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<const N: usize> DerefMut for FixedByteArray<N> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<const N: usize> From<[u8; N]> for FixedByteArray<N> {
+    fn from(value: [u8; N]) -> Self {
+        Self(value)
+    }
+}
+
+impl<const N: usize> TryFrom<&[u8]> for FixedByteArray<N> {
+    type Error = std::array::TryFromSliceError;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        value.try_into().map(Self)
+    }
+}
+
+impl<const N: usize> TryFrom<&Vec<u8>> for FixedByteArray<N> {
+    type Error = std::array::TryFromSliceError;
+
+    fn try_from(value: &Vec<u8>) -> Result<Self, Self::Error> {
+        value.as_slice().try_into().map(Self)
+    }
+}
+
+impl<const N: usize> fmt::LowerHex for FixedByteArray<N> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // This is hacky because we can't make an array of type [u8; {N * 2}] due to
+        // generic parameters not being allowed in constant expressions on stable rust
+        assert_eq!(std::mem::size_of::<[u16; N]>(), std::mem::size_of::<[u8; N]>() * 2);
+        let mut buf = [0u16; N];
+        let slice = unsafe { std::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, N * 2) };
+        hex::encode_to_slice(&self.0, slice).unwrap();
+        f.write_str(std::str::from_utf8(slice).unwrap())
+    }
+}
+
+impl<const N: usize> fmt::Display for FixedByteArray<N> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::LowerHex::fmt(self, f)
+    }
+}
+
+impl<const N: usize> fmt::Debug for FixedByteArray<N> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "FixedByteArray<{N}>({self:x})")
+    }
+}
+
+impl<const N: usize> FromStr for FixedByteArray<N> {
+    type Err = hex::FromHexError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut buf = [0u8; N];
+        hex::decode_to_slice(s, &mut buf)?;
+        Ok(Self(buf))
+    }
 }
 
 /// A codec for fixed-size arrays.
@@ -60,7 +160,7 @@ pub mod fixed_array_codec {
             impl<'de, T: Deserialize<'de>, const N: usize> Visitor<'de> for FixedArrayVisitor<T, N> {
                 type Value = [T; N];
 
-                fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
+                fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                     write!(formatter, "a sequence")
                 }
 
@@ -111,7 +211,7 @@ pub mod vec_codec {
             impl<'de> Visitor<'de> for HexStringOrBytesVisitor {
                 type Value = Vec<u8>;
 
-                fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
+                fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                     formatter.write_str("hex string or byte array")
                 }
 
@@ -152,7 +252,7 @@ fn vec_to_fixed_array<E: serde::de::Error, T, const N: usize>(
 
 #[cfg(test)]
 mod tests {
-    use std::fmt::Debug;
+    use std::fmt::{Debug, Display};
     use bincode::Options;
 
     use serde::{Deserialize, Serialize};
@@ -191,6 +291,15 @@ mod tests {
         json: &str,
     ) {
         assert_eq!(serde_json::from_str::<T>(&json).unwrap(), obj);
+    }
+
+    fn test_display_fromstr<T: Clone + Debug + Eq + Display + FromStr>(
+        obj: T,
+        expect: &str,
+    ) {
+        let string = obj.to_string();
+        assert_eq!(string, expect);
+        assert_eq!(<T as FromStr>::from_str(&string).ok().unwrap(), obj);
     }
 
     macro_rules! test_fixed_array {
@@ -349,5 +458,32 @@ mod tests {
         test_vec_wrapper_codec!(1);
         test_vec_wrapper_codec!(32);
         test_vec_wrapper_codec!(33);
+    }
+
+    #[test]
+    fn test_fixed_byte_array() {
+        const VAL : u8 = 123;
+        const HEX : &str = "7b";
+
+        macro_rules! test_fixed_byte_array {
+            ($n:literal) => {
+                test_bin_codec(bincode_default, FixedByteArray::<$n>([VAL; $n]), &repeat(HEX, $n));
+                test_json_codec(FixedByteArray::<$n>([VAL; $n]), &format!("\"{}\"", repeat(HEX, $n)));
+                test_json_deserialize(FixedByteArray::<$n>([VAL; $n]), &serde_json::to_string(&[VAL; $n].to_vec()).unwrap());
+                test_display_fromstr(FixedByteArray::<$n>([VAL; $n]), &repeat(HEX, $n));
+                assert_eq!(format!("{:x}", FixedByteArray::<$n>([VAL; $n])), repeat(HEX, $n));
+                assert_eq!(
+                    format!("{:?}", FixedByteArray::<$n>([VAL; $n])),
+                    format!("FixedByteArray<{}>({})", $n, repeat(HEX, $n)));
+                assert_eq!(
+                    format!("{:x?}", FixedByteArray::<$n>([VAL; $n])),
+                    format!("FixedByteArray<{}>({})", $n, repeat(HEX, $n)));
+            };
+        }
+
+        test_fixed_byte_array!(0);
+        test_fixed_byte_array!(1);
+        test_fixed_byte_array!(32);
+        test_fixed_byte_array!(33);
     }
 }
