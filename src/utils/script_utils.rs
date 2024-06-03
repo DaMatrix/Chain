@@ -157,30 +157,44 @@ pub fn tx_outs_are_valid(tx_outs: &[TxOut], fees: &[TxOut], tx_ins_spent: AssetV
     tx_outs_spent.is_equal(&tx_ins_spent)
 }
 
-/// Checks whether a create transaction has a valid input script
+/// Checks if a script matches the P2PKH pattern and extracts the relevant fields.
 ///
 /// ### Arguments
 ///
-/// * `script`      - Script to validate
-/// * `asset`       - Asset to be created
-pub fn tx_has_valid_create_script(script: &Script, asset: &Asset) -> bool {
+/// * `script`      - Script to match
+pub fn match_coinbase_script(
+    script: &Script,
+) -> Option<u64> {
     let mut it = script.stack.iter();
-    let asset_hash = construct_tx_in_signable_asset_hash(asset);
-
-    if let Asset::Item(r) = asset {
-        if !item_has_valid_size(r) {
-            trace!("Item metadata is too large");
-            return false;
-        }
+    if let (
+        Some(StackEntry::Num(block_number)),
+        None,
+    ) = (
+        it.next(),
+        it.next(),
+    ) {
+        Some(*block_number as u64)
+    } else {
+        None
     }
+}
 
+/// Checks if a script matches the item creation pattern and extracts the relevant fields.
+///
+/// ### Arguments
+///
+/// * `script`      - Script to match
+pub fn match_create_script(
+    script: &Script,
+) -> Option<(u64, &Vec<u8>, &Signature, &PublicKey)> {
+    let mut it = script.stack.iter();
     if let (
         Some(StackEntry::Op(OpCodes::OP_CREATE)),
-        Some(StackEntry::Num(_)),
+        Some(StackEntry::Num(block_number)),
         Some(StackEntry::Op(OpCodes::OP_DROP)),
         Some(StackEntry::Bytes(b)),
-        Some(StackEntry::Signature(_)),
-        Some(StackEntry::PubKey(_)),
+        Some(StackEntry::Signature(signature)),
+        Some(StackEntry::PubKey(public_key)),
         Some(StackEntry::Op(OpCodes::OP_CHECKSIG)),
         None,
     ) = (
@@ -193,6 +207,29 @@ pub fn tx_has_valid_create_script(script: &Script, asset: &Asset) -> bool {
         it.next(),
         it.next(),
     ) {
+        Some((*block_number as u64, b, signature, public_key))
+    } else {
+        None
+    }
+}
+
+/// Checks whether a create transaction has a valid input script
+///
+/// ### Arguments
+///
+/// * `script`      - Script to validate
+/// * `asset`       - Asset to be created
+pub fn tx_has_valid_create_script(script: &Script, asset: &Asset) -> bool {
+    let asset_hash = construct_tx_in_signable_asset_hash(asset);
+
+    if let Asset::Item(r) = asset {
+        if !item_has_valid_size(r) {
+            trace!("Item metadata is too large");
+            return false;
+        }
+    }
+
+    if let Some((_, b, _, _)) = match_create_script(script) {
         // For legacy reasons, the hashed data is the hex representation of the data rather than
         // the data itself.
         let b_hex = hex::encode(b);
@@ -204,6 +241,42 @@ pub fn tx_has_valid_create_script(script: &Script, asset: &Asset) -> bool {
 
     trace!("Invalid script for create: {:?}", script.stack,);
     false
+}
+
+/// Checks if a script matches the P2PKH pattern and extracts the relevant fields.
+///
+/// ### Arguments
+///
+/// * `script`      - Script to match
+pub fn match_p2pkh_script(
+    script: &Script,
+) -> Option<(&Vec<u8>, &Signature, &PublicKey, &Vec<u8>)> {
+    let mut it = script.stack.iter();
+    if let (
+        Some(StackEntry::Bytes(check_data)),
+        Some(StackEntry::Signature(signature)),
+        Some(StackEntry::PubKey(public_key)),
+        Some(StackEntry::Op(OpCodes::OP_DUP)),
+        Some(StackEntry::Op(OpCodes::OP_HASH256)),
+        Some(StackEntry::Bytes(public_key_hash)),
+        Some(StackEntry::Op(OpCodes::OP_EQUALVERIFY)),
+        Some(StackEntry::Op(OpCodes::OP_CHECKSIG)),
+        None,
+    ) = (
+        it.next(),
+        it.next(),
+        it.next(),
+        it.next(),
+        it.next(),
+        it.next(),
+        it.next(),
+        it.next(),
+        it.next(),
+    ) {
+        Some((check_data, signature, public_key, public_key_hash))
+    } else {
+        None
+    }
 }
 
 /// Checks whether a transaction to spend tokens in P2PKH has a valid signature
@@ -219,27 +292,7 @@ fn tx_has_valid_p2pkh_sig(script: &Script, outpoint_hash: &str, tx_out_pub_key: 
 
     debug!("script: {:?}", script.stack);
 
-    if let (
-        Some(StackEntry::Bytes(b)),
-        Some(StackEntry::Signature(_)),
-        Some(StackEntry::PubKey(_)),
-        Some(StackEntry::Op(OpCodes::OP_DUP)),
-        Some(StackEntry::Op(OpCodes::OP_HASH256)),
-        Some(StackEntry::Bytes(h)),
-        Some(StackEntry::Op(OpCodes::OP_EQUALVERIFY)),
-        Some(StackEntry::Op(OpCodes::OP_CHECKSIG)),
-        None,
-    ) = (
-        it.next(),
-        it.next(),
-        it.next(),
-        it.next(),
-        it.next(),
-        it.next(),
-        it.next(),
-        it.next(),
-        it.next(),
-    ) {
+    if let Some((b, _, _, h)) = match_p2pkh_script(script) {
         debug!("b: {:?}, h: {:?}", b, h);
 
         // For legacy reasons, the hashed data is the hex representation of the data rather than
