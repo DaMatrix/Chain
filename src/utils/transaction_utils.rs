@@ -6,7 +6,6 @@ use crate::primitives::druid::{DdeValues, DruidExpectation};
 use crate::primitives::transaction::*;
 use crate::script::lang::Script;
 use crate::script::{OpCodes, StackEntry};
-use bincode::serialize;
 use std::collections::BTreeMap;
 use tracing::debug;
 
@@ -21,10 +20,7 @@ pub struct ReceiverInfo {
 ///
 /// * `script` - Script to build address for
 pub fn construct_p2sh_address(script: &Script) -> String {
-    let bytes = match serialize(script) {
-        Ok(bytes) => bytes,
-        Err(_) => vec![],
-    };
+    let bytes = bincode::serialize(script).unwrap();
     let mut addr = hex::encode(sha3_256::digest(&bytes));
     addr.insert(ZERO, P2SH_PREPEND as char);
     addr.truncate(STANDARD_ADDRESS_LENGTH);
@@ -344,7 +340,7 @@ pub fn update_utxo_set(current_utxo: &mut BTreeMap<OutPoint, Transaction>) {
 ///
 /// * `tx`  - Transaction to hash
 pub fn construct_tx_hash(tx: &Transaction) -> String {
-    let bytes = match serialize(tx) {
+    let bytes = match bincode::serialize(tx) {
         Ok(bytes) => bytes,
         Err(_) => vec![],
     };
@@ -1179,7 +1175,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let bytes = match serialize(&tx_ins) {
+        let bytes = match bincode::serialize(&tx_ins) {
             Ok(bytes) => bytes,
             Err(_) => vec![],
         };

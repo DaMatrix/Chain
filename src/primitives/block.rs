@@ -4,7 +4,6 @@ use crate::crypto::sha3_256::{self, Sha3_256};
 use crate::crypto::sign_ed25519::PublicKey;
 use crate::primitives::asset::Asset;
 use crate::primitives::transaction::{Transaction, TxIn, TxOut};
-use bincode::{deserialize, serialize};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
@@ -82,7 +81,7 @@ impl Block {
 
     /// Sets the internal number of bits based on length
     pub fn set_bits(&mut self) {
-        let bytes = Bytes::from(match serialize(&self) {
+        let bytes = Bytes::from(match bincode::serialize(&self) {
             Ok(bytes) => bytes,
             Err(e) => {
                 warn!("Failed to serialize block: {:?}", e);
@@ -94,7 +93,7 @@ impl Block {
 
     /// Checks whether a block has hit its maximum size
     pub fn is_full(&self) -> bool {
-        let bytes = Bytes::from(match serialize(&self) {
+        let bytes = Bytes::from(match bincode::serialize(&self) {
             Ok(bytes) => bytes,
             Err(e) => {
                 warn!("Failed to serialize block: {:?}", e);
@@ -143,7 +142,7 @@ pub fn gen_random_hash() -> String {
 ///
 /// * `transactions`    - Transactions to construct a merkle tree for
 pub fn build_hex_txs_hash(transactions: &[String]) -> String {
-    let txs = match serialize(transactions) {
+    let txs = match bincode::serialize(transactions) {
         Ok(bytes) => bytes,
         Err(e) => {
             warn!("Failed to serialize transactions: {:?}", e);
