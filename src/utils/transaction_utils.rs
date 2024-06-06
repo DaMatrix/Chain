@@ -8,6 +8,7 @@ use crate::script::lang::Script;
 use crate::script::{OpCodes, StackEntry};
 use std::collections::BTreeMap;
 use tracing::debug;
+use crate::primitives::format;
 
 pub struct ReceiverInfo {
     pub address: String,
@@ -290,9 +291,9 @@ pub fn update_utxo_set(current_utxo: &mut BTreeMap<OutPoint, Transaction>) {
 ///
 /// * `tx`  - Transaction to hash
 pub fn construct_tx_hash(tx: &Transaction) -> String {
-    let bytes = match bincode::serde::encode_to_vec(tx, bincode::config::legacy()) {
-        Ok(bytes) => bytes,
-        Err(_) => vec![],
+    let bytes = match tx.version {
+        TxVersion::V6 => format::v6::serialize(tx)
+            .expect("Failed to serialize v6 transaction!"),
     };
     let mut hash = hex::encode(sha3_256::digest(&bytes));
     hash.insert(ZERO, TX_PREPEND as char);

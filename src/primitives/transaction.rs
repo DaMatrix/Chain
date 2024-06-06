@@ -1,4 +1,6 @@
 #![allow(unused)]
+
+use std::convert::TryInto;
 use crate::constants::*;
 use crate::crypto::sign_ed25519::{PublicKey, Signature};
 use crate::primitives::{
@@ -7,10 +9,50 @@ use crate::primitives::{
 };
 use crate::script::lang::Script;
 use crate::script::{OpCodes, StackEntry};
-use crate::utils::is_valid_amount;
+use crate::utils::{FromOrdinal, is_valid_amount, ToOrdinal};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use bincode::{Decode, Encode, impl_borrow_decode};
+use bincode::de::Decoder;
+use bincode::enc::Encoder;
+use bincode::enc::write::Writer;
+use bincode::error::{AllowedEnumVariants, DecodeError, EncodeError};
 use crate::primitives::format::v6;
+
+make_ordinal_enum!(
+#[doc = "The supported transaction versions"]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TxVersion {
+    #[doc = "Transaction version 6."]
+    #[doc = "This is the version used when the AIBlock network first went live."]
+    V6 = 6,
+}
+all_variants=pub ALL_VERISONS);
+
+impl TxVersion {
+    /// The most recent transaction version.
+    pub const LATEST : Self = Self::V6;
+}
+
+impl Encode for TxVersion {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        <u32 as bincode::Encode>::encode(&self.to_ordinal(), encoder)
+    }
+}
+
+impl Decode for TxVersion {
+    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let ordinal = <u32 as bincode::Decode>::decode(decoder)?;
+
+        Self::from_ordinal(ordinal)
+            .map_err(|ordinal| DecodeError::UnexpectedVariant {
+                type_name: "TxVersion",
+                allowed: &AllowedEnumVariants::Allowed(Self::ALL_ORDINALS),
+                found: ordinal,
+            })
+    }
+}
+impl_borrow_decode!(TxVersion);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GenesisTxHashSpec {
@@ -37,7 +79,7 @@ pub struct TxConstructor {
 }
 
 /// An outpoint - a combination of a transaction hash and an index n into its vout
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize, Encode, Decode)]
 pub struct OutPoint {
     pub t_hash: String,
     pub n: i32,
@@ -65,7 +107,7 @@ impl Default for OutPoint {
 /// An input of a transaction. It contains the location of the previous
 /// transaction's output that it claims and a signature that matches the
 /// output's public key.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Encode, Decode)]
 pub struct TxIn {
     pub previous_out: Option<OutPoint>,
     pub script_signature: Script,
@@ -118,7 +160,7 @@ impl TxIn {
 /// An output of a transaction. It contains the public key that the next input
 /// must be able to sign with to claim it. It also contains the block hash for the
 /// potential DRS if this is a data asset transaction
-#[derive(Default, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Encode, Decode)]
 pub struct TxOut {
     pub value: Asset,
     pub locktime: u64,
@@ -177,7 +219,7 @@ impl TxOut {
 make_error_type!(
 #[doc = "An error which can occur while processing a transaction"]
 pub enum TransactionError {
-    BadVersion(version: u64); "Unknown or unsupported transaction version: {version}",
+    BadVersion(version: TxVersion); "Unknown or unsupported transaction version: {version}",
     BadData; "Failed to deserialize transaction",
     V6Serialize(cause: v6::ToV6Error); "Failed to serialize v6 transaction: {cause}"; cause,
     V6Deserialize(cause: v6::FromV6Error); "Failed to deserialize v6 transaction: {cause}"; cause,
@@ -185,11 +227,11 @@ pub enum TransactionError {
 
 /// The basic transaction that is broadcasted on the network and contained in
 /// blocks. A transaction can contain multiple inputs and outputs.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Encode, Decode)]
 pub struct Transaction {
+    pub version: TxVersion,
     pub inputs: Vec<TxIn>,
     pub outputs: Vec<TxOut>,
-    pub version: usize,
     pub fees: Vec<TxOut>,
     pub druid_info: Option<DdeValues>,
 }
@@ -202,12 +244,13 @@ impl Default for Transaction {
 
 impl Transaction {
     /// Creates a new Transaction instance
+    #[deprecated = "Transactions should not be used in a mutable fashion"]
     pub fn new() -> Transaction {
         Transaction {
+            version: TxVersion::V6,
             inputs: Vec::new(),
             outputs: Vec::new(),
             fees: Vec::new(),
-            version: NETWORK_VERSION as usize,
             druid_info: None,
         }
     }
@@ -252,8 +295,8 @@ impl Transaction {
     /// Serializes this transaction
     pub fn serialize(&self) -> Result<Vec<u8>, TransactionError> {
         match self.version {
-            6 => v6::serialize(self).map_err(TransactionError::V6Serialize),
-            version => Err(TransactionError::BadVersion(version as u64)),
+            TxVersion::V6 => v6::serialize(self).map_err(TransactionError::V6Serialize),
+            version => Err(TransactionError::BadVersion(version)),
         }
     }
 

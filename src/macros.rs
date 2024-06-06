@@ -5,7 +5,7 @@
 ///
 /// Example usage:
 /// ```ignore
-/// make_error_type!(pub MyError {
+/// make_error_type!(pub enum MyError {
 ///     Unknown; "Unknown error",
 ///     IncorrectLength(length: usize); "Incorrect length {length}, expected 123",
 ///     InvalidHexData(source: hex::FromHexError); "Cannot convert hex string: {source}"; source,
@@ -60,6 +60,91 @@ macro_rules! make_error_type {
                         write!(_f, $tmsg)
                     ),+
                 }
+            }
+        }
+    };
+}
+
+/// Generate an enum where each variant simply wraps a numeric ordinal number.
+///
+/// This will automatically generate the enum, but also implement the following traits:
+/// * `ToOrdinal` and `FromOrdinal` with the given ordinal numbers
+/// * `ToName` and `FromName` with the variant names
+/// * `Display` with the variant names
+///
+/// Additionally, a constant array containing every enum variant will be generated with the
+/// given name and visibility.
+///
+/// Example usage:
+/// ```ignore
+/// make_ordinal_enum!(pub enum MyError {
+///     Hello = 2,
+///     World = 3,
+/// }
+/// all_variants=pub(crate) ALL_VARIANTS);
+/// ```
+macro_rules! make_ordinal_enum {
+    (
+        $( #[$eattr:meta] )*
+        $evis:vis enum $ename:ident {
+            $(
+                $( #[$vattr:meta] )*
+                $vname:ident = $vord:literal,
+            )+
+        }
+        all_variants=$all_variants_vis:vis $all_variants:ident
+    ) => {
+        $( #[$eattr] )*
+        $evis enum $ename {
+            $( $( #[$vattr] )* $vname = $vord, )+
+        }
+
+        impl $ename {
+            $all_variants_vis const $all_variants : &'static [Self] =
+                &[ $( Self::$vname, )+ ];
+        }
+
+        impl crate::utils::ToOrdinal for $ename {
+            fn to_ordinal(&self) -> u32 {
+                match self {
+                    $( Self::$vname => $vord, )+
+                }
+            }
+        }
+
+        impl crate::utils::FromOrdinal for $ename {
+            const ALL_ORDINALS: &'static [u32] = &[ $($vord,)+ ];
+
+            fn from_ordinal(ordinal: u32) -> Result<Self, u32> {
+                match ordinal {
+                    $( $vord => Ok(Self::$vname), )+
+                    _ => Err(ordinal),
+                }
+            }
+        }
+
+        impl crate::utils::ToName for $ename {
+            fn to_name(&self) -> &'static str {
+                match self {
+                    $( Self::$vname => stringify!($vname), )+
+                }
+            }
+        }
+
+        impl crate::utils::FromName for $ename {
+            const ALL_NAMES: &'static [&'static str] = &[ $(stringify!($vname),)+ ];
+
+            fn from_name(name: &str) -> Result<Self, &str> {
+                match name {
+                    $( stringify!($vname) => Ok(Self::$vname), )+
+                    _ => Err(name),
+                }
+            }
+        }
+
+        impl std::fmt::Display for $ename {
+            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str(crate::utils::ToName::to_name(self))
             }
         }
     };

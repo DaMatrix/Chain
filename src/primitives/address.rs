@@ -4,7 +4,7 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use crate::crypto::sha3_256;
 use crate::utils::Placeholder;
-use crate::utils::serialize_utils::{fixed_array_codec, FixedByteArray};
+use crate::utils::serialize_utils::FixedByteArray;
 
 pub const STANDARD_ADDRESS_BYTES : usize = sha3_256::HASH_LEN;
 

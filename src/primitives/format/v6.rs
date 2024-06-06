@@ -60,7 +60,7 @@ struct V6TxOut {
 struct V6Transaction {
     inputs: Vec<V6TxIn>,
     outputs: Vec<V6TxOut>,
-    version: usize,
+    version: u64,
     fees: Vec<V6TxOut>,
     druid_info: Option<V6DdeValues>,
 }
@@ -77,7 +77,7 @@ struct V6DruidExpectation {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 struct V6DdeValues {
     druid: String,
-    participants: usize,
+    participants: u64,
     expectations: Vec<V6DruidExpectation>,
     genesis_hash: Option<String>,
 }
@@ -408,11 +408,11 @@ fn upgrade_v6_ddevalues(old: &V6DdeValues) -> Result<DdeValues, FromV6Error> {
 
 fn upgrade_v6_tx(old: &V6Transaction) -> Result<Transaction, FromV6Error> {
     if old.version != 6 {
-        return Err(FromV6Error::BadVersion(old.version as u64));
+        return Err(FromV6Error::BadVersion(old.version));
     }
     
     Ok(Transaction {
-        version: 6,
+        version: TxVersion::V6,
         inputs: old.inputs.iter().map(upgrade_v6_txin).collect::<Result<Vec<_>, _>>()?,
         outputs: old.outputs.iter().map(upgrade_v6_txout).collect::<Result<Vec<_>, _>>()?,
         fees: old.fees.iter().map(upgrade_v6_txout).collect::<Result<Vec<_>, _>>()?,
@@ -438,7 +438,7 @@ pub fn deserialize(bytes: &[u8]) -> Result<Transaction, FromV6Error> {
 }
 
 make_error_type!(pub enum ToV6Error {
-    BadVersion(version: u64); "not a v6 transaction: {version}",
+    BadVersion(version: TxVersion); "not a v6 transaction: {version}",
     BadOpcode(name: &'static str); "script contained unsupported opcode \"{name}\"",
     NotHexBytes(bytes: String, cause: hex::FromHexError);
         "script contained invalid hex bytes: \"{bytes}\": {cause}"; cause,
@@ -617,8 +617,8 @@ fn downgrade_v6_ddevalues(old: &DdeValues) -> Result<V6DdeValues, ToV6Error> {
 }
 
 fn downgrade_v6_tx(old: &Transaction) -> Result<V6Transaction, ToV6Error> {
-    if old.version != 6 {
-        return Err(ToV6Error::BadVersion(old.version as u64));
+    if old.version != TxVersion::V6 {
+        return Err(ToV6Error::BadVersion(old.version));
     }
     
     Ok(V6Transaction {
@@ -700,8 +700,6 @@ pub fn serialize(tx: &Transaction) -> Result<Vec<u8>, ToV6Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use std::collections::BTreeMap;
     use crate::constants::{STANDARD_ADDRESS_LENGTH_BYTES, TX_HASH_LENGTH};
     use crate::crypto::sign_ed25519;

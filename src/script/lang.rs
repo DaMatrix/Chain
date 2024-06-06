@@ -1,4 +1,6 @@
 #![allow(unused)]
+
+use bincode::{Decode, Encode};
 use crate::constants::*;
 use crate::crypto::sha3_256;
 use crate::crypto::sign_ed25519::{
@@ -152,7 +154,7 @@ impl ConditionStack {
 
 /// Scripts are defined as a sequence of stack entries
 /// NOTE: A tuple struct could probably work here as well
-#[derive(Clone, Debug, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialOrd, Eq, PartialEq, Serialize, Deserialize, Encode, Decode)]
 pub struct Script {
     pub stack: Vec<StackEntry>,
 }

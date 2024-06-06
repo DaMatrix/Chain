@@ -4,6 +4,7 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
+use bincode::{Decode, Encode};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde::de::{SeqAccess, Visitor};
@@ -29,7 +30,7 @@ impl std::io::Write for ByteCountingWriter {
 ///
 /// This can be formatted to and parsed from a hexadecimal string using `Display` and `FromStr`.
 /// When serialized as JSON, it is also represented as a hexadecimal string.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Encode, Decode)]
 pub struct FixedByteArray<const N: usize>(
     #[serde(with = "fixed_array_codec")]
     [u8; N],

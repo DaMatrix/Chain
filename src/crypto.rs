@@ -5,7 +5,7 @@ use crate::utils::serialize_utils::FixedByteArray;
 macro_rules! fixed_bytes_wrapper {
     ($vis:vis struct $name:ident, $n:expr, $doc:literal) => {
         #[doc = $doc]
-        #[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
+        #[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize, bincode::Encode, bincode::Decode)]
         $vis struct $name(crate::utils::serialize_utils::FixedByteArray<$n>);
 
         impl $name {
