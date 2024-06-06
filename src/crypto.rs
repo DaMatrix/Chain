@@ -131,7 +131,21 @@ pub mod sign_ed25519 {
 
     pub fn gen_keypair() -> (PublicKey, SecretKey) {
         let rand = ring::rand::SystemRandom::new();
-        let pkcs8 = match SecretKeyBase::generate_pkcs8(&rand) {
+        gen_keypair_internal(SecretKeyBase::generate_pkcs8(&rand))
+    }
+
+    #[cfg(test)]
+    pub fn gen_test_keypair(n: u64) -> (PublicKey, SecretKey) {
+        let seed : [u8; 32] = *super::sha3_256::digest(&n.to_le_bytes());
+        let rand = ring::test::rand::FixedSliceSequenceRandom {
+            bytes: &[ &seed ],
+            current: core::cell::UnsafeCell::new(0),
+        };
+        gen_keypair_internal(SecretKeyBase::generate_pkcs8(&rand))
+    }
+
+    fn gen_keypair_internal(pkcs8: Result<ring::pkcs8::Document, ring::error::Unspecified>) -> (PublicKey, SecretKey) {
+        let pkcs8 = match pkcs8 {
             Ok(pkcs8) => pkcs8,
             Err(_) => {
                 warn!("Failed to generate secret key base for pkcs8");
