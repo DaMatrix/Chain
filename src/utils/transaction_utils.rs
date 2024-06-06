@@ -20,7 +20,7 @@ pub struct ReceiverInfo {
 ///
 /// * `script` - Script to build address for
 pub fn construct_p2sh_address(script: &Script) -> String {
-    let bytes = bincode::serialize(script).unwrap();
+    let bytes = bincode::serde::encode_to_vec(script, bincode::config::legacy()).unwrap();
     let mut addr = hex::encode(sha3_256::digest(&bytes));
     addr.insert(ZERO, P2SH_PREPEND as char);
     addr.truncate(STANDARD_ADDRESS_LENGTH);
@@ -340,7 +340,7 @@ pub fn update_utxo_set(current_utxo: &mut BTreeMap<OutPoint, Transaction>) {
 ///
 /// * `tx`  - Transaction to hash
 pub fn construct_tx_hash(tx: &Transaction) -> String {
-    let bytes = match bincode::serialize(tx) {
+    let bytes = match bincode::serde::encode_to_vec(tx, bincode::config::legacy()) {
         Ok(bytes) => bytes,
         Err(_) => vec![],
     };
@@ -1175,7 +1175,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let bytes = match bincode::serialize(&tx_ins) {
+        let bytes = match bincode::serde::encode_to_vec(&tx_ins, bincode::config::legacy()) {
             Ok(bytes) => bytes,
             Err(_) => vec![],
         };
