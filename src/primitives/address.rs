@@ -10,6 +10,7 @@ pub const STANDARD_ADDRESS_BYTES : usize = sha3_256::HASH_LEN;
 
 /// A standard 32-byte address.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct StandardAddress(FixedByteArray<STANDARD_ADDRESS_BYTES>);
 
 impl StandardAddress {
@@ -22,8 +23,8 @@ impl StandardAddress {
 }
 
 impl Placeholder for StandardAddress {
-    fn placeholder() -> Self {
-        Self([0u8; STANDARD_ADDRESS_BYTES].into())
+    fn placeholder_indexed(index: u64) -> Self {
+        Self::new(sha3_256::digest(&index.to_le_bytes()))
     }
 }
 
@@ -56,6 +57,7 @@ macro_rules! standard_address_type {
     ($doc:literal, $name:ident, $prefix:literal) => {
         #[doc = $doc]
         #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
+        #[serde(transparent)]
         pub struct $name(StandardAddress);
 
         impl $name {
@@ -68,6 +70,10 @@ macro_rules! standard_address_type {
         impl Placeholder for $name {
             fn placeholder() -> Self {
                 Self(StandardAddress::placeholder())
+            }
+
+            fn placeholder_indexed(index: u64) -> Self {
+                Self(StandardAddress::placeholder_indexed(index))
             }
         }
 

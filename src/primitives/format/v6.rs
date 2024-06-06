@@ -710,8 +710,8 @@ mod tests {
     use crate::utils::transaction_utils::ReceiverInfo;
 
     fn test_construct_valid_inputs() -> (Vec<TxIn>, BTreeMap<OutPoint, (PublicKey, SecretKey)>) {
-        let (_pk, sk) = sign_ed25519::gen_test_keypair(0);
-        let (pk, _sk) = sign_ed25519::gen_test_keypair(1);
+        let (_pk, sk) = sign_ed25519::gen_test_keypair(0).unwrap();
+        let (pk, _sk) = sign_ed25519::gen_test_keypair(1).unwrap();
         let t_hash = [0u8; TX_HASH_LENGTH / 2];
         let prev_out = OutPoint::new(hex::encode(&t_hash), 0);
 
@@ -874,7 +874,7 @@ mod tests {
     #[test]
     // Creates a valid UTXO set
     fn test_construct_valid_utxo_set() {
-        let (pk, sk) = sign_ed25519::gen_test_keypair(0);
+        let (pk, sk) = sign_ed25519::gen_test_keypair(0).unwrap();
 
         let t_hash_1 = hex::encode(&[0u8; TX_HASH_LENGTH / 2]);
 

@@ -29,7 +29,7 @@ pub fn generate_tx_with_ins_and_outs_assets(
     input_assets: &[(u64, Option<&str>, Option<String>)], /* Input amount, genesis_hash, metadata */
     output_assets: &[(u64, Option<&str>)],                /* Input amount, genesis_hash */
 ) -> (BTreeMap<OutPoint, TxOut>, Transaction) {
-    let (pk, sk) = sign::gen_keypair();
+    let (pk, sk) = sign::gen_keypair().unwrap();
     let spk = construct_address(&pk);
     let mut tx = Transaction::new();
     let mut utxo_set: BTreeMap<OutPoint, TxOut> = BTreeMap::new();

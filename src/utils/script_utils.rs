@@ -1954,7 +1954,7 @@ mod tests {
     /// Test OP_SHA3
     fn test_sha3() {
         /// op_sha3([sig]) -> [sha3_256(sig)]
-        let (pk, sk) = sign::gen_keypair();
+        let (pk, sk) = sign::gen_keypair().unwrap();
         let msg = hex::encode(vec![0, 0, 0]);
         let sig = sign::sign_detached(msg.as_bytes(), &sk);
         let h = sha3_256::digest(sig.as_ref()).to_vec();
@@ -1993,7 +1993,7 @@ mod tests {
     /// Test OP_HASH256
     fn test_hash256() {
         /// op_hash256([pk]) -> [addr]
-        let (pk, sk) = sign::gen_keypair();
+        let (pk, sk) = sign::gen_keypair().unwrap();
         let mut stack = Stack::new();
         stack.push(StackEntry::PubKey(pk));
         let mut v: Vec<StackEntry> = vec![StackEntry::Bytes(hex::decode(construct_address(&pk)).unwrap())];
@@ -2009,7 +2009,7 @@ mod tests {
     /// Test OP_CHECKSIG
     fn test_checksig() {
         /// op_checksig([msg,sig,pk]) -> [1]
-        let (pk, sk) = sign::gen_keypair();
+        let (pk, sk) = sign::gen_keypair().unwrap();
         let msg = hex::encode(vec![0, 0, 0]);
         let sig = sign::sign_detached(msg.as_bytes(), &sk);
         let mut stack = Stack::new();
@@ -2031,7 +2031,7 @@ mod tests {
         assert_eq!(stack.main_stack, v);
         /// wrong public key
         /// op_checksig([msg,sig,pk']) -> [0]
-        let (pk, sk) = sign::gen_keypair();
+        let (pk, sk) = sign::gen_keypair().unwrap();
         let msg = hex::encode(vec![0, 0, 0]);
         let mut stack = Stack::new();
         stack.push(StackEntry::Bytes(hex::decode(msg).unwrap()));
@@ -2053,7 +2053,7 @@ mod tests {
     /// Test OP_CHECKSIGVERIFY
     fn test_checksigverify() {
         /// op_checksigverify([msg,sig,pk]) -> []
-        let (pk, sk) = sign::gen_keypair();
+        let (pk, sk) = sign::gen_keypair().unwrap();
         let msg = hex::encode(vec![0, 0, 0]);
         let sig = sign::sign_detached(msg.as_bytes(), &sk);
         let mut stack = Stack::new();
@@ -2074,7 +2074,7 @@ mod tests {
         assert!(!b);
         /// wrong public key
         /// op_checksig([msg,sig,pk']) -> fail
-        let (pk, sk) = sign::gen_keypair();
+        let (pk, sk) = sign::gen_keypair().unwrap();
         let msg = hex::encode(vec![0, 0, 0]);
         let mut stack = Stack::new();
         stack.push(StackEntry::Bytes(hex::decode(msg).unwrap()));
@@ -2096,9 +2096,9 @@ mod tests {
     fn test_checkmultisig() {
         /// 2-of-3 multisig
         /// op_checkmultisig([msg,sig1,sig2,2,pk1,pk2,pk3,3]) -> [1]
-        let (pk1, sk1) = sign::gen_keypair();
-        let (pk2, sk2) = sign::gen_keypair();
-        let (pk3, sk3) = sign::gen_keypair();
+        let (pk1, sk1) = sign::gen_keypair().unwrap();
+        let (pk2, sk2) = sign::gen_keypair().unwrap();
+        let (pk3, sk3) = sign::gen_keypair().unwrap();
         let msg = hex::encode(vec![0, 0, 0]);
         let sig1 = sign::sign_detached(msg.as_bytes(), &sk1);
         let sig2 = sign::sign_detached(msg.as_bytes(), &sk2);
@@ -2249,9 +2249,9 @@ mod tests {
     fn test_checkmultisigverify() {
         /// 2-of-3 multisig
         /// op_checkmultisigverify([msg,sig1,sig2,2,pk1,pk2,pk3,3]) -> []
-        let (pk1, sk1) = sign::gen_keypair();
-        let (pk2, sk2) = sign::gen_keypair();
-        let (pk3, sk3) = sign::gen_keypair();
+        let (pk1, sk1) = sign::gen_keypair().unwrap();
+        let (pk2, sk2) = sign::gen_keypair().unwrap();
+        let (pk3, sk3) = sign::gen_keypair().unwrap();
         let msg = hex::encode(vec![0, 0, 0]);
         let sig1 = sign::sign_detached(msg.as_bytes(), &sk1);
         let sig2 = sign::sign_detached(msg.as_bytes(), &sk2);
@@ -2705,7 +2705,7 @@ mod tests {
     fn test_pass_create_script_valid() {
         let asset = Asset::item(1, None, None);
         let asset_hash = construct_tx_in_signable_asset_hash(&asset);
-        let (pk, sk) = sign::gen_keypair();
+        let (pk, sk) = sign::gen_keypair().unwrap();
         let signature = sign::sign_detached(asset_hash.as_bytes(), &sk);
 
         let script = Script::new_create_asset(0, asset_hash, signature, pk);
@@ -2718,7 +2718,7 @@ mod tests {
         let metadata = String::from_utf8_lossy(&[0; MAX_METADATA_BYTES + 1]).to_string();
         let asset = Asset::item(1, None, Some(metadata));
         let asset_hash = construct_tx_in_signable_asset_hash(&asset);
-        let (pk, sk) = sign::gen_keypair();
+        let (pk, sk) = sign::gen_keypair().unwrap();
         let signature = sign::sign_detached(asset_hash.as_bytes(), &sk);
 
         let script = Script::new_create_asset(0, asset_hash, signature, pk);
@@ -2728,7 +2728,7 @@ mod tests {
     #[test]
     /// Checks whether addresses are validated correctly
     fn test_validate_addresses_correctly() {
-        let (pk, _) = sign::gen_keypair();
+        let (pk, _) = sign::gen_keypair().unwrap();
         let address = construct_address(&pk);
 
         assert!(address_has_valid_length(&address));
@@ -2739,7 +2739,7 @@ mod tests {
     #[test]
     /// Checks that correct member multisig scripts are validated as such
     fn test_pass_member_multisig_valid() {
-        let (pk, sk) = sign::gen_keypair();
+        let (pk, sk) = sign::gen_keypair().unwrap();
         let t_hash = hex::encode(vec![0, 0, 0]);
         let signature = sign::sign_detached(t_hash.as_bytes(), &sk);
 
@@ -2757,8 +2757,8 @@ mod tests {
     #[test]
     /// Checks that incorrect member multisig scripts are validated as such
     fn test_fail_member_multisig_invalid() {
-        let (_pk, sk) = sign::gen_keypair();
-        let (pk, _sk) = sign::gen_keypair();
+        let (_pk, sk) = sign::gen_keypair().unwrap();
+        let (pk, _sk) = sign::gen_keypair().unwrap();
         let t_hash = hex::encode(vec![0, 0, 0]);
         let signature = sign::sign_detached(t_hash.as_bytes(), &sk);
 
@@ -2776,7 +2776,7 @@ mod tests {
     #[test]
     /// Checks that correct p2pkh transaction signatures are validated as such
     fn test_pass_p2pkh_sig_valid() {
-        let (pk, sk) = sign::gen_keypair();
+        let (pk, sk) = sign::gen_keypair().unwrap();
         let outpoint = OutPoint {
             t_hash: hex::encode(vec![0, 0, 0]),
             n: 0,
@@ -2807,8 +2807,8 @@ mod tests {
     #[test]
     /// Checks that invalid p2pkh transaction signatures are validated as such
     fn test_fail_p2pkh_sig_invalid() {
-        let (pk, sk) = sign::gen_keypair();
-        let (second_pk, _s) = sign::gen_keypair();
+        let (pk, sk) = sign::gen_keypair().unwrap();
+        let (second_pk, _s) = sign::gen_keypair().unwrap();
         let outpoint = OutPoint {
             t_hash: hex::encode(vec![0, 0, 0]),
             n: 0,
@@ -2836,7 +2836,7 @@ mod tests {
     #[test]
     /// Checks that invalid p2pkh transaction signatures are validated as such
     fn test_fail_p2pkh_sig_script_empty() {
-        let (pk, sk) = sign::gen_keypair();
+        let (pk, sk) = sign::gen_keypair().unwrap();
         let outpoint = OutPoint {
             t_hash: hex::encode(vec![0, 0, 0]),
             n: 0,
@@ -2873,7 +2873,7 @@ mod tests {
     #[test]
     /// Checks that invalid p2pkh transaction signatures are validated as such
     fn test_fail_p2pkh_sig_script_invalid_struct() {
-        let (pk, sk) = sign::gen_keypair();
+        let (pk, sk) = sign::gen_keypair().unwrap();
         let outpoint = OutPoint {
             t_hash: hex::encode(vec![0, 0, 0]),
             n: 0,
@@ -2914,9 +2914,9 @@ mod tests {
     #[test]
     /// Checks that correct multisig validation signatures are validated as such
     fn test_pass_multisig_validation_valid() {
-        let (first_pk, first_sk) = sign::gen_keypair();
-        let (second_pk, second_sk) = sign::gen_keypair();
-        let (third_pk, third_sk) = sign::gen_keypair();
+        let (first_pk, first_sk) = sign::gen_keypair().unwrap();
+        let (second_pk, second_sk) = sign::gen_keypair().unwrap();
+        let (third_pk, third_sk) = sign::gen_keypair().unwrap();
         let check_data = hex::encode(vec![0, 0, 0]);
 
         let m = 2;
@@ -2963,7 +2963,7 @@ mod tests {
         //
         // Arrange
         //
-        let (pk, sk) = sign::gen_keypair();
+        let (pk, sk) = sign::gen_keypair().unwrap();
         let tx_hash = hex::encode(vec![0, 0, 0]);
         let tx_outpoint = OutPoint::new(tx_hash, 0);
         let script_public_key = construct_address(&pk);
@@ -3187,8 +3187,8 @@ mod tests {
     #[test]
     /// Checks that incorrect member interpret scripts are validated as such
     fn test_fail_interpret_valid() {
-        let (_pk, sk) = sign::gen_keypair();
-        let (pk, _sk) = sign::gen_keypair();
+        let (_pk, sk) = sign::gen_keypair().unwrap();
+        let (pk, _sk) = sign::gen_keypair().unwrap();
         let t_hash = hex::encode(vec![0, 0, 0]);
         let signature = sign::sign_detached(t_hash.as_bytes(), &sk);
 
@@ -3206,7 +3206,7 @@ mod tests {
     #[test]
     /// Checks that interpret scripts are validated as such
     fn test_pass_interpret_valid() {
-        let (pk, sk) = sign::gen_keypair();
+        let (pk, sk) = sign::gen_keypair().unwrap();
         let t_hash = hex::encode(vec![0, 0, 0]);
         let signature = sign::sign_detached(t_hash.as_bytes(), &sk);
 

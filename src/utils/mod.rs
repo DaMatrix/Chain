@@ -55,9 +55,21 @@ pub fn add_btreemap<E: Ord, T: Copy + std::ops::AddAssign>(
 
 /// A trait which indicates that it is possible to acquire a "placeholder" value
 /// of a type, which can be used for test purposes.
-pub trait Placeholder {
+pub trait Placeholder : Sized {
     /// Gets a dummy value of this type which can be used for test purposes.
-    fn placeholder() -> Self;
+    fn placeholder() -> Self {
+        Self::placeholder_indexed(0)
+    }
+
+    /// Gets a dummy valid of this type which can be used for test purposes.
+    ///
+    /// This allows acquiring multiple distinct placeholder values which are still consistent
+    /// between runs.
+    ///
+    /// ### Arguments
+    ///
+    /// * `index`  - the index of the dummy value to obtain
+    fn placeholder_indexed(index: u64) -> Self;
 }
 
 /// A trait which indicates that a type can be represented by an ordinal number.

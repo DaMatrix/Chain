@@ -12,6 +12,7 @@ use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
 
 use merkle_log::{MemoryStore, MerkleLog, Store};
+use crate::utils::ToOrdinal;
 
 /// Block header, which contains a smaller footprint view of the block.
 /// Hash records are assumed to be 256 bit
@@ -38,7 +39,8 @@ impl BlockHeader {
     /// Creates a new BlockHeader
     pub fn new() -> BlockHeader {
         BlockHeader {
-            version: NETWORK_VERSION,
+            // TODO: this field shouldn't be u32
+            version: NETWORK_VERSION.to_ordinal(),
             bits: 0,
             nonce_and_mining_tx_hash: Default::default(),
             b_num: 0,

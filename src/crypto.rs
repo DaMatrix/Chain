@@ -58,14 +58,31 @@ pub mod sign_ed25519 {
     fixed_bytes_wrapper!(pub struct PublicKey, ED25519_PUBLIC_KEY_LEN, "Public key data");
 
     /// PKCS8 encoded secret key pair
-    /// We used sodiumoxide serialization before (treated it as slice with 64 bit length prefix).
-    /// Slice and vector are serialized the same.
     #[derive(Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
     pub struct SecretKey(#[serde(with = "crate::utils::serialize_utils::vec_codec")] Vec<u8>);
 
     impl SecretKey {
-        pub fn from_slice(slice: &[u8]) -> Option<Self> {
-            Some(Self(slice.to_vec()))
+        /// Constructs a secret key from the given byte slice.
+        ///
+        /// Fails if the given slice does not contain a valid PKCS8-encoded Ed25519 secret key.
+        ///
+        /// ### Arguments
+        ///
+        /// * `slice` - a slice containing the PKCS8-encoded secret key
+        pub fn from_slice(slice: &[u8]) -> Result<Self, ring::error::KeyRejected> {
+            SecretKeyBase::from_pkcs8(slice)?;
+            Ok(Self(slice.to_vec()))
+        }
+
+        /// Constructs a secret key from the given byte slice.
+        ///
+        /// This does not check if the provided data is a valid PKCS8-encoded Ed25519 secret key.
+        ///
+        /// ### Arguments
+        ///
+        /// * `slice` - a slice containing the PKCS8-encoded secret key
+        pub unsafe fn from_slice_unsafe(slice: &[u8]) -> Self {
+            Self(slice.to_vec())
         }
     }
 
@@ -123,13 +140,22 @@ pub mod sign_ed25519 {
         sm
     }
 
-    pub fn gen_keypair() -> (PublicKey, SecretKey) {
+    make_error_type!(pub enum GenKeypairError {
+        FailedPKCS8(cause: ring::error::Unspecified);
+            "Failed to generate secret key base for pkcs8: {cause}",
+        InvalidSecretKey(cause: ring::error::KeyRejected);
+            "Invalid secret key base: {cause}",
+        InvalidPublicKey;
+            "Invalid public key generation",
+    });
+
+    pub fn gen_keypair() -> Result<(PublicKey, SecretKey), GenKeypairError> {
         let rand = ring::rand::SystemRandom::new();
         gen_keypair_internal(SecretKeyBase::generate_pkcs8(&rand))
     }
 
     #[cfg(test)]
-    pub fn gen_test_keypair(n: u64) -> (PublicKey, SecretKey) {
+    pub fn gen_test_keypair(n: u64) -> Result<(PublicKey, SecretKey), GenKeypairError> {
         let seed : [u8; 32] = *super::sha3_256::digest(&n.to_le_bytes());
         let rand = ring::test::rand::FixedSliceSequenceRandom {
             bytes: &[ &seed ],
@@ -138,40 +164,22 @@ pub mod sign_ed25519 {
         gen_keypair_internal(SecretKeyBase::generate_pkcs8(&rand))
     }
 
-    fn gen_keypair_internal(pkcs8: Result<ring::pkcs8::Document, ring::error::Unspecified>) -> (PublicKey, SecretKey) {
-        let pkcs8 = match pkcs8 {
-            Ok(pkcs8) => pkcs8,
-            Err(_) => {
-                warn!("Failed to generate secret key base for pkcs8");
-                return (PublicKey([0; ED25519_PUBLIC_KEY_LEN].into()), SecretKey(vec![]));
-            }
-        };
+    fn gen_keypair_internal(
+        pkcs8: Result<ring::pkcs8::Document, ring::error::Unspecified>,
+    ) -> Result<(PublicKey, SecretKey), GenKeypairError> {
+        let pkcs8 = pkcs8.map_err(GenKeypairError::FailedPKCS8)?;
 
-        let secret = match SecretKeyBase::from_pkcs8(pkcs8.as_ref()) {
-            Ok(secret) => secret,
-            Err(_) => {
-                warn!("Invalid secret key base");
-                return (PublicKey([0; ED25519_PUBLIC_KEY_LEN].into()), SecretKey(vec![]));
-            }
-        };
+        let keypair = SecretKeyBase::from_pkcs8(pkcs8.as_ref())
+            .map_err(GenKeypairError::InvalidSecretKey)?;
 
-        let pub_key_gen = match secret.public_key().as_ref().try_into() {
-            Ok(pub_key_gen) => pub_key_gen,
-            Err(_) => {
-                warn!("Invalid public key generation");
-                return (PublicKey([0; ED25519_PUBLIC_KEY_LEN].into()), SecretKey(vec![]));
-            }
-        };
-        let public = PublicKey(pub_key_gen);
-        let secret = match SecretKey::from_slice(pkcs8.as_ref()) {
-            Some(secret) => secret,
-            None => {
-                warn!("Invalid secret key");
-                return (PublicKey([0; ED25519_PUBLIC_KEY_LEN].into()), SecretKey(vec![]));
-            }
-        };
+        let public = PublicKey::from_slice(keypair.public_key().as_ref())
+            .ok_or(GenKeypairError::InvalidPublicKey)?;
 
-        (public, secret)
+        // We know that the PKCS8 document is valid because we already called
+        // SecretKeyBase::from_pkcs8 on it, so we can skip the second check.
+        let secret = unsafe { SecretKey::from_slice_unsafe(pkcs8.as_ref()) };
+
+        Ok((public, secret ))
     }
 }
 

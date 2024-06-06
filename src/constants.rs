@@ -1,3 +1,5 @@
+use crate::primitives::transaction::TxVersion;
+
 /*------- TRANSACTION CONSTANTS -------*/
 pub const TX_PREPEND: u8 = b'g';
 pub const ITEM_DEFAULT_DRS_TX_HASH: &str = "default_genesis_hash";
@@ -13,8 +15,7 @@ pub const P2SH_PREPEND: u8 = b'H';
 
 /*------- NETWORK CONSTANTS --------*/
 // Current network version: Always bump immediately after a version is deployed.
-pub const NETWORK_VERSION: u32 = 6;
-pub const NETWORK_VERSION_SERIALIZED: &[u8] = b"6";
+pub const NETWORK_VERSION: TxVersion = TxVersion::V6;
 
 /*------- VALUE HANDLING CONSTANTS --------*/
 // Number of decimal places to divide to in display

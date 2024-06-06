@@ -74,7 +74,7 @@ mod tests {
         let tx_input = construct_payment_tx_ins(vec![]);
         let from_addr = construct_tx_ins_address(&tx_input);
 
-        let (pk, sk) = sign::gen_keypair();
+        let (pk, sk) = sign::gen_keypair().unwrap();
         let prev_out = OutPoint::new("t_hash".to_string(), 0);
         let mut key_material = BTreeMap::new();
         key_material.insert(prev_out, (pk, sk));
@@ -167,7 +167,7 @@ mod tests {
             let excess_tx_out =
                 TxOut::new_token_amount(sender_address_excess, amount - payment, None);
             
-            let (pk, sk) = sign::gen_keypair();
+            let (pk, sk) = sign::gen_keypair().unwrap();
             let prev_out = OutPoint::new("t_hash".to_string(), 0);
             key_material.insert(prev_out, (pk, sk));
 
