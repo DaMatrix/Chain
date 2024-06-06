@@ -4,9 +4,9 @@ use crate::crypto::sha3_256::{self, Sha3_256};
 use crate::crypto::sign_ed25519::PublicKey;
 use crate::primitives::asset::Asset;
 use crate::primitives::transaction::{Transaction, TxIn, TxOut};
-use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
+use bytes::Bytes;
 use tracing::warn;
 
 use rand::distributions::Alphanumeric;

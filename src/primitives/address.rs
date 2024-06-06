@@ -53,7 +53,8 @@ make_error_type!(pub enum ParseAddressError {
 });
 
 macro_rules! standard_address_type {
-    ($name:ident, $prefix:literal) => {
+    ($doc:literal, $name:ident, $prefix:literal) => {
+        #[doc = $doc]
         #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
         pub struct $name(StandardAddress);
 
@@ -90,11 +91,9 @@ macro_rules! standard_address_type {
     };
 }
 
-/// The type of address used for P2PKH outputs
-standard_address_type!(P2PKHAddress, "");
+standard_address_type!("The type of address used for P2PKH outputs", P2PKHAddress, "");
 
-/// The type of address used for P2SH outputs
-standard_address_type!(P2SHAddress, "H");
+standard_address_type!("The type of address used for P2SH outputs", P2SHAddress, "H");
 
 /// Wrapper enum representing an address of any type.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]

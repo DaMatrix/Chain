@@ -8,10 +8,9 @@ use crate::primitives::{
 use crate::script::lang::Script;
 use crate::script::{OpCodes, StackEntry};
 use crate::utils::is_valid_amount;
-use bincode::serialize;
-use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use crate::primitives::format::v6;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GenesisTxHashSpec {
@@ -175,6 +174,15 @@ impl TxOut {
     }
 }
 
+make_error_type!(
+#[doc = "An error which can occur while processing a transaction"]
+pub enum TransactionError {
+    BadVersion(version: u64); "Unknown or unsupported transaction version: {version}",
+    BadData; "Failed to deserialize transaction",
+    V6Serialize(cause: v6::ToV6Error); "Failed to serialize v6 transaction: {cause}"; cause,
+    V6Deserialize(cause: v6::FromV6Error); "Failed to deserialize v6 transaction: {cause}"; cause,
+});
+
 /// The basic transaction that is broadcasted on the network and contained in
 /// blocks. A transaction can contain multiple inputs and outputs.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -202,15 +210,6 @@ impl Transaction {
             version: NETWORK_VERSION as usize,
             druid_info: None,
         }
-    }
-
-    /// Get the total transaction size in bytes
-    pub fn get_total_size(&self) -> usize {
-        let bytes = match serialize(self) {
-            Ok(bytes) => bytes,
-            Err(_) => vec![],
-        };
-        bytes.len()
     }
 
     /// Gets the create asset assigned to this transaction, if it exists
@@ -248,5 +247,26 @@ impl Transaction {
         }
 
         false
+    }
+
+    /// Serializes this transaction
+    pub fn serialize(&self) -> Result<Vec<u8>, TransactionError> {
+        match self.version {
+            6 => v6::serialize(self).map_err(TransactionError::V6Serialize),
+            version => Err(TransactionError::BadVersion(version as u64)),
+        }
+    }
+
+    /// Deserializes a transaction from the given bytes
+    ///
+    /// ### Arguments
+    ///
+    /// * `bytes`   - a slice containing the serialized transaction
+    pub fn deserialize(bytes: &[u8]) -> Result<Transaction, TransactionError> {
+        match bytes.first() {
+            Some(0) => v6::deserialize(bytes).map_err(TransactionError::V6Deserialize),
+            Some(_) => Err(TransactionError::BadData),
+            None => Err(TransactionError::BadData),
+        }
     }
 }

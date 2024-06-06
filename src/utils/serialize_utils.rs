@@ -5,22 +5,9 @@ use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
 
-use bincode::config::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde::de::{SeqAccess, Visitor};
 use serde::ser::{SerializeTuple};
-
-pub fn bincode_default() -> WithOtherTrailing<WithOtherIntEncoding<DefaultOptions, FixintEncoding>, RejectTrailing> {
-    DefaultOptions::new()
-        .with_fixint_encoding()
-        .reject_trailing_bytes()
-}
-
-pub fn bincode_compact() -> WithOtherTrailing<WithOtherIntEncoding<DefaultOptions, VarintEncoding>, RejectTrailing> {
-    DefaultOptions::new()
-        .with_varint_encoding()
-        .reject_trailing_bytes()
-}
 
 /// Simple wrapper around a fixed-length byte array.
 ///
@@ -260,10 +247,23 @@ fn vec_to_fixed_array<E: serde::de::Error, T, const N: usize>(
 mod tests {
     use std::fmt::{Debug, Display};
     use bincode::Options;
+    use bincode::config::*;
 
     use serde::{Deserialize, Serialize};
     use serde::de::DeserializeOwned;
     use super::*;
+
+    fn bincode_default() -> WithOtherTrailing<WithOtherIntEncoding<DefaultOptions, FixintEncoding>, RejectTrailing> {
+        DefaultOptions::new()
+            .with_fixint_encoding()
+            .reject_trailing_bytes()
+    }
+
+    fn bincode_compact() -> WithOtherTrailing<WithOtherIntEncoding<DefaultOptions, VarintEncoding>, RejectTrailing> {
+        DefaultOptions::new()
+            .with_varint_encoding()
+            .reject_trailing_bytes()
+    }
 
     fn repeat(orig: &str, n: usize) -> String {
         let mut res = String::with_capacity(orig.len() * n);
