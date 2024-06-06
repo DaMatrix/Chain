@@ -6,7 +6,6 @@ use crate::primitives::asset::Asset;
 use crate::primitives::transaction::{Transaction, TxIn, TxOut};
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
-use bytes::Bytes;
 use tracing::warn;
 
 use rand::distributions::Alphanumeric;
@@ -81,25 +80,25 @@ impl Block {
 
     /// Sets the internal number of bits based on length
     pub fn set_bits(&mut self) {
-        let bytes = Bytes::from(match bincode::serialize(&self) {
+        let bytes = match bincode::serde::encode_to_vec(&self, bincode::config::legacy()) {
             Ok(bytes) => bytes,
             Err(e) => {
                 warn!("Failed to serialize block: {:?}", e);
                 return;
             }
-        });
+        };
         self.header.bits = bytes.len();
     }
 
     /// Checks whether a block has hit its maximum size
     pub fn is_full(&self) -> bool {
-        let bytes = Bytes::from(match bincode::serialize(&self) {
+        let bytes = match bincode::serde::encode_to_vec(&self, bincode::config::legacy()) {
             Ok(bytes) => bytes,
             Err(e) => {
                 warn!("Failed to serialize block: {:?}", e);
                 return false;
             }
-        });
+        };
         bytes.len() >= MAX_BLOCK_SIZE
     }
 
@@ -142,7 +141,8 @@ pub fn gen_random_hash() -> String {
 ///
 /// * `transactions`    - Transactions to construct a merkle tree for
 pub fn build_hex_txs_hash(transactions: &[String]) -> String {
-    let txs = match bincode::serialize(transactions) {
+    // TODO: This is bad, it won't produce the same result on 32-bit systems
+    let txs = match bincode::serde::encode_to_vec(transactions, bincode::config::legacy()) {
         Ok(bytes) => bytes,
         Err(e) => {
             warn!("Failed to serialize transactions: {:?}", e);

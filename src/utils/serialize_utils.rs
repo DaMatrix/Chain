@@ -9,6 +9,22 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde::de::{SeqAccess, Visitor};
 use serde::ser::{SerializeTuple};
 
+/// Implements `Write` by simply counting the number of bytes written to it.
+pub struct ByteCountingWriter {
+    pub count: usize,
+}
+
+impl std::io::Write for ByteCountingWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.count += buf.len();
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 /// Simple wrapper around a fixed-length byte array.
 ///
 /// This can be formatted to and parsed from a hexadecimal string using `Display` and `FromStr`.
@@ -246,24 +262,11 @@ fn vec_to_fixed_array<E: serde::de::Error, T, const N: usize>(
 #[cfg(test)]
 mod tests {
     use std::fmt::{Debug, Display};
-    use bincode::Options;
-    use bincode::config::*;
 
     use serde::{Deserialize, Serialize};
     use serde::de::DeserializeOwned;
     use super::*;
 
-    fn bincode_default() -> WithOtherTrailing<WithOtherIntEncoding<DefaultOptions, FixintEncoding>, RejectTrailing> {
-        DefaultOptions::new()
-            .with_fixint_encoding()
-            .reject_trailing_bytes()
-    }
-
-    fn bincode_compact() -> WithOtherTrailing<WithOtherIntEncoding<DefaultOptions, VarintEncoding>, RejectTrailing> {
-        DefaultOptions::new()
-            .with_varint_encoding()
-            .reject_trailing_bytes()
-    }
 
     fn repeat(orig: &str, n: usize) -> String {
         let mut res = String::with_capacity(orig.len() * n);
@@ -273,14 +276,14 @@ mod tests {
         res
     }
 
-    fn test_bin_codec<O: Options, T: Clone + Debug + Eq + Serialize + DeserializeOwned>(
-        options: fn() -> O,
+    fn test_bin_codec<C: bincode::config::Config, T: Clone + Debug + Eq + Serialize + DeserializeOwned>(
+        config: fn() -> C,
         obj: T,
         expect: &str,
     ) {
-        let bytes = options().serialize(&obj).unwrap();
+        let bytes = bincode::serde::encode_to_vec(&obj, config()).unwrap();
         assert_eq!(hex::encode(&bytes), expect);
-        assert_eq!(options().deserialize::<T>(&bytes).unwrap(), obj);
+        assert_eq!(bincode::serde::decode_from_slice::<T, C>(&bytes, config()).unwrap().0, obj);
     }
 
     fn test_json_codec<T: Clone + Debug + Eq + Serialize + DeserializeOwned>(
@@ -310,7 +313,7 @@ mod tests {
 
     macro_rules! test_fixed_array {
         ($n:literal) => {
-            test_bin_codec(bincode_default, [VAL; $n], &repeat(HEX, $n));
+            test_bin_codec(bincode::config::legacy, [VAL; $n], &repeat(HEX, $n));
             test_json_codec([VAL; $n], &serde_json::to_string(&[VAL; $n].to_vec()).unwrap());
         };
     }
@@ -319,7 +322,7 @@ mod tests {
         ($e:ty, $t:ident, $n:literal) => {
             #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
             struct $t([$e; $n]);
-            test_bin_codec(bincode_default, $t([VAL; $n]), &repeat(HEX, $n));
+            test_bin_codec(bincode::config::legacy, $t([VAL; $n]), &repeat(HEX, $n));
             test_json_codec($t([VAL; $n]), &serde_json::to_string(&[VAL; $n].to_vec()).unwrap());
         };
     }
@@ -341,7 +344,7 @@ mod tests {
             ($t:ident, $n:literal) => {
                 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
                 struct $t(#[serde(with = "fixed_array_codec")] [u32; $n]);
-                test_bin_codec(bincode_default, $t([VAL; $n]), &repeat(HEX, $n));
+                test_bin_codec(bincode::config::legacy, $t([VAL; $n]), &repeat(HEX, $n));
                 test_json_codec($t([VAL; $n]), &serde_json::to_string(&[VAL; $n].to_vec()).unwrap());
             };
         }
@@ -369,7 +372,7 @@ mod tests {
             ($t:ident, $n:literal) => {
                 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
                 struct $t(#[serde(with = "fixed_array_codec")] [u8; $n]);
-                test_bin_codec(bincode_default, $t([VAL; $n]), &repeat(HEX, $n));
+                test_bin_codec(bincode::config::legacy, $t([VAL; $n]), &repeat(HEX, $n));
                 test_json_codec($t([VAL; $n]), &format!("\"{}\"", hex::encode(&[VAL; $n].to_vec())));
                 test_json_deserialize($t([VAL; $n]), &serde_json::to_string(&[VAL; $n].to_vec()).unwrap());
             };
@@ -382,19 +385,19 @@ mod tests {
     }
 
     fn size_to_hex_default(n: usize) -> String {
-        hex::encode(bincode_default().serialize(&n).unwrap())
+        hex::encode(&(n as u64).to_le_bytes())
     }
 
     macro_rules! test_vec {
         ($n:literal) => {
-            test_bin_codec(bincode_default, [VAL; $n].to_vec(), &format!("{}{}", size_to_hex_default($n), repeat(HEX, $n)));
+            test_bin_codec(bincode::config::legacy, [VAL; $n].to_vec(), &format!("{}{}", size_to_hex_default($n), repeat(HEX, $n)));
             test_json_codec([VAL; $n].to_vec(), &serde_json::to_string(&[VAL; $n].to_vec()).unwrap());
         };
     }
 
     macro_rules! test_vec_wrapper {
         ($n:literal) => {
-            test_bin_codec(bincode_default, VecWrapper([VAL; $n].to_vec()), &format!("{}{}", size_to_hex_default($n), repeat(HEX, $n)));
+            test_bin_codec(bincode::config::legacy, VecWrapper([VAL; $n].to_vec()), &format!("{}{}", size_to_hex_default($n), repeat(HEX, $n)));
             test_json_codec(VecWrapper([VAL; $n].to_vec()), &serde_json::to_string(&[VAL; $n].to_vec()).unwrap());
         };
     }
@@ -421,7 +424,7 @@ mod tests {
         struct CodecVecWrapper(#[serde(with = "vec_codec")] Vec<u32>);
         macro_rules! test_vec_wrapper_codec {
             ($n:literal) => {
-                test_bin_codec(bincode_default, CodecVecWrapper([VAL; $n].to_vec()), &format!("{}{}", size_to_hex_default($n), repeat(HEX, $n)));
+                test_bin_codec(bincode::config::legacy, CodecVecWrapper([VAL; $n].to_vec()), &format!("{}{}", size_to_hex_default($n), repeat(HEX, $n)));
                 test_json_codec(CodecVecWrapper([VAL; $n].to_vec()), &serde_json::to_string(&[VAL; $n].to_vec()).unwrap());
             };
         }
@@ -454,7 +457,7 @@ mod tests {
         struct CodecVecWrapper(#[serde(with = "vec_codec")] Vec<u8>);
         macro_rules! test_vec_wrapper_codec {
             ($n:literal) => {
-                test_bin_codec(bincode_default, CodecVecWrapper([VAL; $n].to_vec()), &format!("{}{}", size_to_hex_default($n), repeat(HEX, $n)));
+                test_bin_codec(bincode::config::legacy, CodecVecWrapper([VAL; $n].to_vec()), &format!("{}{}", size_to_hex_default($n), repeat(HEX, $n)));
                 test_json_codec(CodecVecWrapper([VAL; $n].to_vec()), &format!("\"{}\"", hex::encode(&[VAL; $n].to_vec())));
                 test_json_deserialize(CodecVecWrapper([VAL; $n].to_vec()), &serde_json::to_string(&[VAL; $n].to_vec()).unwrap());
             };
@@ -473,7 +476,7 @@ mod tests {
 
         macro_rules! test_fixed_byte_array {
             ($n:literal) => {
-                test_bin_codec(bincode_default, FixedByteArray::<$n>([VAL; $n]), &repeat(HEX, $n));
+                test_bin_codec(bincode::config::legacy, FixedByteArray::<$n>([VAL; $n]), &repeat(HEX, $n));
                 test_json_codec(FixedByteArray::<$n>([VAL; $n]), &format!("\"{}\"", repeat(HEX, $n)));
                 test_json_deserialize(FixedByteArray::<$n>([VAL; $n]), &serde_json::to_string(&[VAL; $n].to_vec()).unwrap());
                 test_display_fromstr(FixedByteArray::<$n>([VAL; $n]), &repeat(HEX, $n));

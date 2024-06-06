@@ -1,5 +1,4 @@
 use std::convert::TryInto;
-use bincode::Options;
 use serde::{Deserialize, Serialize};
 use crate::crypto::sign_ed25519::{PublicKey, Signature};
 use crate::primitives::asset::{Asset, ItemAsset, TokenAmount};
@@ -25,7 +24,7 @@ struct V6Signature(
 fn v6_deserialize_slice<'de, D: serde::Deserializer<'de>, const N: usize>(
     deserializer: D,
 ) -> Result<[u8; N], D::Error> {
-    let value: &[u8] = serde::Deserialize::deserialize(deserializer)?;
+    let value: Vec<u8> = serde::Deserialize::deserialize(deserializer)?;
     value
         .try_into()
         .map_err(|_| serde::de::Error::custom("Invalid array in deserialization".to_string()))
@@ -227,18 +226,14 @@ enum V6OpCodes {
     OP_NOP10 = 0xb9,
 }
 
-macro_rules! bincode_options { () => {
-    bincode::DefaultOptions::new()
-        .with_fixint_encoding()
-        .reject_trailing_bytes()
-}; }
-
 make_error_type!(pub enum FromV6Error {
     BadVersion(version: u64); "not a v6 transaction: {version}",
+    DataRemaining(remaining: usize);
+        "{remaining} bytes left over after v6 transaction deserialization",
     BadOpcode(name: &'static str); "script contained unsupported opcode \"{name}\"",
     NotHexBytes(bytes: String, cause: hex::FromHexError);
         "script contained invalid hex bytes: \"{bytes}\": {cause}"; cause,
-    Deserialize(cause: bincode::Error);
+    Deserialize(cause: bincode::error::DecodeError);
         "failed to deserialize v6 transaction: {cause}"; cause,
 });
 
@@ -431,10 +426,15 @@ fn upgrade_v6_tx(old: &V6Transaction) -> Result<Transaction, FromV6Error> {
 ///
 /// * `bytes`  - a slice containing the serialized v6 transaction
 pub fn deserialize(bytes: &[u8]) -> Result<Transaction, FromV6Error> {
-    bincode_options!()
-        .deserialize::<V6Transaction>(bytes)
-        .map_err(FromV6Error::Deserialize)
-        .and_then(|tx| upgrade_v6_tx(&tx))
+    let (tx, read_bytes) =
+        bincode::serde::decode_from_slice(bytes, bincode::config::legacy())
+            .map_err(FromV6Error::Deserialize)?;
+
+    if read_bytes == bytes.len() {
+        upgrade_v6_tx(&tx)
+    } else {
+        Err(FromV6Error::DataRemaining(bytes.len() - read_bytes))
+    }
 }
 
 make_error_type!(pub enum ToV6Error {
@@ -442,7 +442,7 @@ make_error_type!(pub enum ToV6Error {
     BadOpcode(name: &'static str); "script contained unsupported opcode \"{name}\"",
     NotHexBytes(bytes: String, cause: hex::FromHexError);
         "script contained invalid hex bytes: \"{bytes}\": {cause}"; cause,
-    Serialize(cause: bincode::Error);
+    Serialize(cause: bincode::error::EncodeError);
         "failed to serialize v6 transaction: {cause}"; cause,
 });
 
@@ -636,7 +636,8 @@ fn downgrade_v6_tx(old: &Transaction) -> Result<V6Transaction, ToV6Error> {
 ///
 /// * `tx`    - A v6 transaction in the new object representation
 pub fn serialize(tx: &Transaction) -> Result<Vec<u8>, ToV6Error> {
-    bincode_options!().serialize(&downgrade_v6_tx(tx)?).map_err(ToV6Error::Serialize)
+    bincode::serde::encode_to_vec(&downgrade_v6_tx(tx)?, bincode::config::legacy())
+        .map_err(ToV6Error::Serialize)
 }
 
 /// Checks if a transaction meets all the requirements for upgrading to version 7, otherwise

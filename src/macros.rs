@@ -39,6 +39,7 @@ macro_rules! make_error_type {
         }
 
         impl std::error::Error for $name {
+            #[allow(unused_variables)]
             fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
                 match self {
                     $(
