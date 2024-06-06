@@ -18,13 +18,24 @@ macro_rules! make_error_type {
     (@fmt_source) => { None };
     (@fmt_source $sourcen:expr) => { Some($sourcen) };
 
-    ($(#[derive( $($derive:ident),+ )])?  $vis:vis $name:ident {
-        $( $tname:ident $(( $($targn:ident : $targ:ty),+ ))? ; $tmsg:literal $(; $sourcen:expr )?),+ $(,)?
-    }) => {
-        $( #[derive( $($derive),+ )] )?
-        #[derive(Clone, std::fmt::Debug)]
+    (
+        $( #[$attr:meta] )*
+        $vis:vis enum $name:ident {
+            $( $(
+                #[$tattr:meta] )*
+                $tname:ident $(( $($targn:ident : $targ:ty),+ ))?
+                ; $tmsg:literal
+                $( ; $sourcen:expr )?
+            ),+ $(,)?
+        }
+    ) => {
+        $( #[$attr] )*
+        #[derive(::std::fmt::Debug)]
         $vis enum $name {
-            $( $tname $(( $($targ),+ ))? ),+
+            $(
+                $( #[$tattr] )*
+                $tname $(( $($targ),+ ))?
+            ),+
         }
 
         impl std::error::Error for $name {

@@ -47,7 +47,7 @@ impl AsRef<[u8]> for StandardAddress {
     }
 }
 
-make_error_type!(pub ParseAddressError {
+make_error_type!(pub enum ParseAddressError {
     BadPrefix(address: String); "Address \"{address}\" has unknown prefix",
     ParseFailed(cause: <StandardAddress as FromStr>::Err); "{cause}"; cause,
 });
