@@ -1,4 +1,6 @@
 #![allow(unused)]
+
+use std::convert::TryInto;
 use crate::constants::*;
 use crate::crypto::sign_ed25519::{PublicKey, Signature};
 use crate::primitives::{
@@ -8,8 +10,11 @@ use crate::primitives::{
 use crate::script::lang::Script;
 use crate::script::{OpCodes, StackEntry};
 use crate::utils::is_valid_amount;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
+use std::str::FromStr;
+use bincode::{Decode, Encode};
+use crate::crypto::sha3_256;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GenesisTxHashSpec {
@@ -34,6 +39,120 @@ pub struct TxConstructor {
     pub signatures: Vec<Signature>,
     pub pub_keys: Vec<PublicKey>,
     pub address_version: Option<u64>,
+}
+
+const TX_HASH_LENGTH_BYTES : usize = TX_HASH_LENGTH / 2;
+
+/// Compact transaction hash representation.
+///
+/// For legacy reasons, this wraps 31 hexadecimal digits worth of data, equivalent to 15.5 bytes.
+/// Because of this, the 4 least significant bits of the last byte are unused. While awkward, this
+/// actually means we have a convenient location to squeeze in a version indicator if we decide to
+/// extend the transaction hash size in the future.
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Encode, Decode)]
+pub struct TxHash([u8; TX_HASH_LENGTH_BYTES]);
+
+make_error_type!(pub enum TxHashError {
+    BadByteCount(size: usize); "Transaction hash needs {TX_HASH_LENGTH_BYTES} bytes, got {size}",
+    BadZeroBits; "Transaction hash must end with four zero bits",
+
+    InvalidStringLength(input: String); "Transaction hash \"{input}\" has incorrect length",
+    InvalidPrefix(input: String); "Transaction hash \"{input}\" has incorrect prefix",
+    InvalidHexData(input: String, cause: hex::FromHexError); "Transaction hash \"{input}\" is invalid: {cause}"; cause,
+});
+
+impl TxHash {
+    /// Constructs a new `TransactionHash` from the given bytes.
+    ///
+    /// Fails if the given slice does not contain a valid encoded `TransactionHash`.
+    pub fn from_slice(slice: &[u8]) -> Result<Self, TxHashError> {
+        let bytes : [u8; TX_HASH_LENGTH_BYTES] = slice.try_into()
+            .map_err(|_| TxHashError::BadByteCount(slice.len()))?;
+
+        // The four least significant bits of the last byte must be zero, as a transaction
+        // hash consists of an odd number of hexadecimal digits.
+        if (bytes[TX_HASH_LENGTH_BYTES - 1] & 0xF) != 0 {
+            return Err(TxHashError::BadZeroBits);
+        }
+
+        Ok(Self(bytes))
+    }
+
+    /// Constructs a `TransactionHash` based on the given SHA3-256 hash.
+    pub fn from_hash(hash: sha3_256::Hash) -> Self {
+        let mut chunk = (*hash).first_chunk::<TX_HASH_LENGTH_BYTES>().unwrap().clone();
+        chunk[TX_HASH_LENGTH_BYTES - 1] &= 0xF0;
+        Self::from_slice(&chunk).unwrap()
+    }
+}
+
+#[cfg(test)]
+impl crate::utils::PlaceholderSeed for TxHash {
+    fn placeholder_seed_parts<'a>(seed_parts: impl IntoIterator<Item=&'a [u8]>) -> Self {
+        let mut bytes = crate::utils::placeholder_bytes::<TX_HASH_LENGTH_BYTES>(
+            [ "TxHash:".as_bytes() ].iter().copied().chain(seed_parts)
+        );
+        bytes[TX_HASH_LENGTH_BYTES - 1] &= 0xF0;
+        Self::from_slice(&bytes).unwrap()
+    }
+}
+
+impl fmt::Display for TxHash {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // Encode the binary data as hex, and add the prefix character.
+        // The buffer is one character larger than necessary because of the trailing four zero bits.
+        let mut chars = [0u8; {TX_HASH_LENGTH + 1}];
+        chars[0] = TX_PREPEND;
+        hex::encode_to_slice(self.0, &mut chars[1..]).unwrap();
+        f.write_str(std::str::from_utf8(&chars[0..TX_HASH_LENGTH]).unwrap())
+    }
+}
+
+impl FromStr for TxHash {
+    type Err = TxHashError;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        if input.len() != TX_HASH_LENGTH {
+            return Err(TxHashError::InvalidStringLength(input.to_string()));
+        } else if input.as_bytes()[0] != TX_PREPEND {
+            return Err(TxHashError::InvalidPrefix(input.to_string()));
+        }
+
+        // Strip the leading TX_PREPEND character, and then pad the string by adding an
+        // additional trailing '0' character so that the hex string is parseable.
+        let mut chars = [0u8; TX_HASH_LENGTH];
+        *chars.first_chunk_mut::<{TX_HASH_LENGTH - 1}>().unwrap() = input.as_bytes()[1..].try_into().unwrap();
+        chars[TX_HASH_LENGTH - 1] = '0' as u8;
+
+        // Parse the hex string
+        let mut bytes = [0u8; TX_HASH_LENGTH_BYTES];
+        hex::decode_to_slice(&chars, &mut bytes)
+            .map_err(|e| TxHashError::InvalidHexData(input.to_string(), e))?;
+        Self::from_slice(&bytes)
+    }
+}
+
+impl AsRef<[u8]> for TxHash {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
+impl Serialize for TxHash {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        assert!(serializer.is_human_readable(), "serializer must be human-readable!");
+
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for TxHash {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        assert!(deserializer.is_human_readable(), "deserializer must be human-readable!");
+
+        let text : String = serde::Deserialize::deserialize(deserializer)?;
+        text.parse().map_err(<D::Error as serde::de::Error>::custom)
+    }
 }
 
 /// An outpoint - a combination of a transaction hash and an index n into its vout
@@ -238,5 +357,48 @@ impl Transaction {
         }
 
         false
+    }
+}
+
+/*---- TESTS ----*/
+
+#[cfg(test)]
+mod tests {
+    use crate::utils::PlaceholderSeed;
+    use super::*;
+
+    #[test]
+    fn test_tx_hash_string() {
+        let hash = TxHash::placeholder_indexed(0);
+        let string = hash.to_string();
+        assert_eq!(string, "g1a30d8257870b5d077fc55d1faa63aa");
+        assert_eq!(TxHash::from_str(&string).unwrap(), hash);
+    }
+
+    #[test]
+    fn test_tx_hash_slice() {
+        let hash = TxHash::placeholder_indexed(0);
+        let bytes = hash.as_ref().to_vec();
+        assert_eq!(hex::encode(&bytes), "1a30d8257870b5d077fc55d1faa63aa0");
+        assert_eq!(TxHash::from_slice(&bytes).unwrap(), hash);
+    }
+
+    #[test]
+    fn test_tx_hash_bincode() {
+        let config = bincode::config::standard();
+        let hash = TxHash::placeholder_indexed(0);
+
+        let serialized = bincode::encode_to_vec(&hash, config.clone()).unwrap();
+        assert_eq!(&serialized, hash.as_ref());
+        let deserialized: TxHash = bincode::decode_from_slice(&serialized, config.clone()).unwrap().0;
+        assert_eq!(deserialized, hash);
+    }
+
+    #[test]
+    fn test_tx_hash_serdejson() {
+        let hash = TxHash::placeholder_indexed(0);
+        let json = serde_json::to_string(&hash).unwrap();
+        assert_eq!(json, "\"g1a30d8257870b5d077fc55d1faa63aa\"");
+        assert_eq!(serde_json::from_str::<TxHash>(&json).unwrap(), hash);
     }
 }
