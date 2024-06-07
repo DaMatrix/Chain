@@ -571,6 +571,7 @@ fn downgrade_v6_script(old: &Script) -> Result<V6Script, ToV6Error> {
                     OpCodes::OP_NOP10 => Ok(V6OpCodes::OP_NOP10),
                     OpCodes::OP_NOP11 => Err(ToV6Error::BadOpcode("OP_NOP11")),
                     OpCodes::OP_NOP12 => Err(ToV6Error::BadOpcode("OP_NOP12")),
+                    _ => Err(ToV6Error::BadOpcode("???")), //TODO
                 }.map(V6StackEntry::Op),
                 StackEntry::Signature(signature) =>
                     Ok(V6StackEntry::Signature(V6Signature(signature.as_ref().try_into().unwrap()))),

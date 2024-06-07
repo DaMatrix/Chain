@@ -445,6 +445,7 @@ impl Transaction {
 
 #[cfg(test)]
 mod tests {
+    use crate::utils::serialize_utils::{bincode_decode_from_slice_standard_full, bincode_encode_to_vec_standard};
     use super::*;
 
     #[test]
@@ -472,12 +473,11 @@ mod tests {
 
     #[test]
     fn test_tx_hash_bincode() {
-        let config = bincode::config::standard();
         let hash = TxHash::placeholder();
 
-        let serialized = bincode::encode_to_vec(&hash, config.clone()).unwrap();
+        let serialized = bincode_encode_to_vec_standard(&hash).unwrap();
         assert_eq!(&serialized, hash.as_ref());
-        let deserialized: TxHash = bincode::decode_from_slice(&serialized, config.clone()).unwrap().0;
+        let deserialized: TxHash = bincode_decode_from_slice_standard_full(&serialized).unwrap();
         assert_eq!(deserialized, hash);
     }
 

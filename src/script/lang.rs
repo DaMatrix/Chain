@@ -11,6 +11,7 @@ use crate::script::{OpCodes, ScriptError, StackEntry};
 use crate::utils::transaction_utils::construct_address;
 use serde::{Deserialize, Serialize};
 use tracing::{error, trace, warn};
+use crate::utils::serialize_utils::{bincode_decode_from_slice_standard, bincode_encode_to_write_standard};
 
 /// Stack for script execution
 #[derive(Clone, Debug, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
@@ -212,17 +213,65 @@ impl ConditionStack {
     }
 }
 
+/// An iterator over a lazily decoded script.
+#[derive(Clone, Debug)]
+pub struct ScriptIterator<'a> {
+    bytes: &'a [u8],
+}
+
+impl<'a> ScriptIterator<'a> {
+    pub fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes }
+    }
+
+    /// Reads the next opcode in the script.
+    ///
+    /// Returns an error if an opcode failed to decode, or None if the end of the script has
+    /// been reached.
+    pub fn next(&mut self) -> Result<Option<OpCodes>, bincode::error::DecodeError> {
+        if self.bytes.is_empty() {
+            return Ok(None);
+        }
+
+        match bincode_decode_from_slice_standard::<OpCodes>(self.bytes) {
+            Ok((opcode, read_bytes)) => {
+                // Remove the first read_bytes from the slice
+                self.bytes = self.bytes.split_at(read_bytes).1;
+                Ok(Some(opcode))
+            }
+            Err(e) => Err(e),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ScriptBuilder {
+    buf: Vec<u8>,
+}
+
+impl ScriptBuilder {
+    /// Creates a new `ScriptBuilder`.
+    pub fn new() -> Self {
+        Self {
+            buf: Vec::new(),
+        }
+    }
+
+    pub fn add(mut self, opcode: &OpCodes) -> Self {
+        bincode_encode_to_write_standard(opcode, &mut self.buf).unwrap();
+        self
+    }
+
+    pub fn build(self) -> Vec<u8> {
+        self.buf
+    }
+}
+
 /// Scripts are defined as a sequence of stack entries
 /// NOTE: A tuple struct could probably work here as well
 #[derive(Clone, Debug, PartialOrd, Eq, PartialEq, Serialize, Deserialize, Encode, Decode)]
 pub struct Script {
     pub stack: Vec<StackEntry>,
-}
-
-impl Default for Script {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl Script {
