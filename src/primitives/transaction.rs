@@ -12,6 +12,7 @@ use crate::script::{OpCodes, StackEntry};
 use crate::utils::{FromOrdinal, is_valid_amount, Placeholder, ToOrdinal};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
+use std::fmt::Formatter;
 use std::str::{from_utf8, FromStr};
 use bincode::{Decode, Encode, impl_borrow_decode};
 use bincode::de::Decoder;
@@ -88,7 +89,7 @@ const TX_HASH_LENGTH_BYTES : usize = TX_HASH_LENGTH / 2;
 /// Because of this, the 4 least significant bits of the last byte are unused. While awkward, this
 /// actually means we have a convenient location to squeeze in a version indicator if we decide to
 /// extend the transaction hash size in the future.
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Encode, Decode)]
+#[derive(Clone, Eq, PartialEq, Hash, Ord, PartialOrd, Encode, Decode)]
 pub struct TxHash([u8; TX_HASH_LENGTH_BYTES]);
 
 make_error_type!(pub enum TxHashError {
@@ -142,6 +143,14 @@ impl fmt::Display for TxHash {
     }
 }
 
+impl fmt::Debug for TxHash {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("TxHash")
+            .field(&self.to_string())
+            .finish()
+    }
+}
+
 impl FromStr for TxHash {
     type Err = TxHashError;
 
@@ -168,7 +177,7 @@ impl FromStr for TxHash {
 
 impl AsRef<[u8]> for TxHash {
     fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
+        &self.0
     }
 }
 
@@ -192,26 +201,33 @@ impl<'de> Deserialize<'de> for TxHash {
 /// An outpoint - a combination of a transaction hash and an index n into its vout
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize, Encode, Decode)]
 pub struct OutPoint {
-    pub t_hash: String,
-    pub n: i32,
-}
-
-impl fmt::Display for OutPoint {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "t_hash:{}-n:{}", self.t_hash, self.n)
-    }
+    pub t_hash: TxHash,
+    pub n: u32,
 }
 
 impl OutPoint {
     /// Creates a new outpoint instance
+    #[deprecated = "Use new_from_hash"]
     pub fn new(t_hash: String, n: i32) -> OutPoint {
-        OutPoint { t_hash, n }
+        OutPoint {
+            t_hash: t_hash.parse()
+                .expect(&format!("Failed to parse transaction hash \"{}\"", t_hash)),
+            n: n.try_into().expect("negative OutPoint index?!?"),
+        }
+    }
+
+    /// Creates a new outpoint instance
+    pub fn new_from_hash(t_hash: TxHash, n: u32) -> OutPoint {
+        OutPoint { t_hash, n, }
     }
 }
 
-impl Default for OutPoint {
-    fn default() -> Self {
-        Self::new(String::new(), 0)
+impl Placeholder for OutPoint {
+    fn placeholder_indexed(index: u64) -> Self {
+        OutPoint {
+            t_hash: TxHash::placeholder_indexed(index),
+            n: 0,
+        }
     }
 }
 
@@ -437,6 +453,13 @@ mod tests {
         let string = hash.to_string();
         assert_eq!(string, "g48dda5bbe9171a6656206ec56c595c5");
         assert_eq!(TxHash::from_str(&string).unwrap(), hash);
+    }
+
+    #[test]
+    fn test_tx_hash_debug() {
+        let hash = TxHash::placeholder();
+        let debug = format!("{hash:?}");
+        assert_eq!(debug, "TxHash(\"g48dda5bbe9171a6656206ec56c595c5\")");
     }
 
     #[test]

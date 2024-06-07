@@ -230,9 +230,15 @@ make_error_type!(pub enum FromV6Error {
     BadVersion(version: u64); "not a v6 transaction: {version}",
     DataRemaining(remaining: usize);
         "{remaining} bytes left over after v6 transaction deserialization",
+
     BadOpcode(name: &'static str); "script contained unsupported opcode \"{name}\"",
     NotHexBytes(bytes: String, cause: hex::FromHexError);
         "script contained invalid hex bytes: \"{bytes}\": {cause}"; cause,
+
+    BadTxHash(cause: TxHashError);
+        "transaction contained invalid transaction hash: {cause}"; cause,
+    BadOutPointIndex(index: i32); "negative outpoint index: {index}",
+
     Deserialize(cause: bincode::error::DecodeError);
         "failed to deserialize v6 transaction: {cause}"; cause,
 });
@@ -367,8 +373,8 @@ fn upgrade_v6_script(old: &V6Script) -> Result<Script, FromV6Error> {
 
 fn upgrade_v6_outpoint(old: &V6OutPoint) -> Result<OutPoint, FromV6Error> {
     Ok(OutPoint {
-        t_hash: old.t_hash.clone(),
-        n: old.n,
+        t_hash: old.t_hash.parse().map_err(FromV6Error::BadTxHash)?,
+        n: old.n.try_into().map_err(|_| FromV6Error::BadOutPointIndex(old.n))?,
     })
 }
 
@@ -439,9 +445,13 @@ pub fn deserialize(bytes: &[u8]) -> Result<Transaction, FromV6Error> {
 
 make_error_type!(pub enum ToV6Error {
     BadVersion(version: TxVersion); "not a v6 transaction: {version}",
+
     BadOpcode(name: &'static str); "script contained unsupported opcode \"{name}\"",
     NotHexBytes(bytes: String, cause: hex::FromHexError);
         "script contained invalid hex bytes: \"{bytes}\": {cause}"; cause,
+
+    BadOutPointIndex(index: u32); "outpoint index too high: {index}",
+
     Serialize(cause: bincode::error::EncodeError);
         "failed to serialize v6 transaction: {cause}"; cause,
 });
@@ -577,8 +587,8 @@ fn downgrade_v6_script(old: &Script) -> Result<V6Script, ToV6Error> {
 
 fn downgrade_v6_outpoint(old: &OutPoint) -> Result<V6OutPoint, ToV6Error> {
     Ok(V6OutPoint {
-        t_hash: old.t_hash.clone(),
-        n: old.n,
+        t_hash: old.t_hash.to_string(),
+        n: old.n.try_into().map_err(|_| ToV6Error::BadOutPointIndex(old.n))?,
     })
 }
 
@@ -701,7 +711,7 @@ pub fn serialize(tx: &Transaction) -> Result<Vec<u8>, ToV6Error> {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use crate::constants::{STANDARD_ADDRESS_LENGTH_BYTES, TX_HASH_LENGTH};
+    use crate::constants::STANDARD_ADDRESS_LENGTH_BYTES;
     use crate::crypto::sign_ed25519;
     use crate::crypto::sign_ed25519::{PublicKey, SecretKey};
     use crate::primitives::asset::{Asset, AssetValues, ItemAsset, TokenAmount};
@@ -713,7 +723,7 @@ mod tests {
         let (_pk, sk) = sign_ed25519::gen_test_keypair(0).unwrap();
         let (pk, _sk) = sign_ed25519::gen_test_keypair(1).unwrap();
         let t_hash = "g48dda5bbe9171a6656206ec56c595c5";
-        let prev_out = OutPoint::new(t_hash.to_string(), 0);
+        let prev_out = OutPoint::new_from_hash(t_hash.parse().unwrap(), 0);
 
         let mut key_material = BTreeMap::new();
         key_material.insert(prev_out.clone(), (pk, sk));
@@ -877,11 +887,9 @@ mod tests {
         let (pk, sk) = sign_ed25519::gen_test_keypair(0).unwrap();
 
         let t_hash_1 = "g48dda5bbe9171a6656206ec56c595c5";
-
-        let prev_out = OutPoint::new(t_hash_1.to_string(), 0);
+        let prev_out = OutPoint::new_from_hash(t_hash_1.parse().unwrap(), 0);
         let mut key_material = BTreeMap::new();
         key_material.insert(prev_out.clone(), (pk, sk.clone()));
-
 
         let tx_1 = TxConstructor {
             previous_out: prev_out,
@@ -902,7 +910,7 @@ mod tests {
             &key_material,
         );
         let tx_1_hash = transaction_utils::construct_tx_hash(&payment_tx_1);
-        let tx_1_out_p = OutPoint::new(tx_1_hash.clone(), 0);
+        let tx_1_out_p = OutPoint::new_from_hash(tx_1_hash.parse().unwrap(), 0);
         key_material.insert(tx_1_out_p.clone(), (pk, sk));
 
         let expected = "0100000000000000012000000000000000673438646461356262653931373161363635363230366563353663353935633500000000080000000000000004000000400000000000000063653137663764316636373539643734326661363763343132343038363863633733393639383431336639313336393330623763383536366135336561663966010000004000000000000000ddb2e62a24f2004b1977afb82700a46121f6f0070c9ccaa24828c82c9806d39eb51921489f34c198861c8d19552324d9813a97e1c5de985db792e1df5914ed0a0200000020000000000000004a423a99c7d946e88da185f8f400e41cee388a95ecedc8603136de50aea12182000000002300000000000000500000000400000040000000000000003039653138346234363365356538643465666161336666353130663138343231633765353066653432666534646137623534353332636132303666333339626200000000350000000000000053000000010000000000000000000000801a0600000000000000000000000000014000000000000000393732653338613030616630323036393065313736663566613465653634613131653362643663626330303037633130666434626265326337356130313062640600000000000000000000000000000000";
@@ -923,7 +931,7 @@ mod tests {
         let payment_tx_2 = transaction_utils::construct_tx_core(tx_ins_2, tx_outs, None);
 
         let tx_2_hash = transaction_utils::construct_tx_hash(&payment_tx_2);
-        let tx_2_out_p = OutPoint::new(tx_2_hash, 0);
+        let tx_2_out_p = OutPoint::new_from_hash(tx_2_hash.parse().unwrap(), 0);
 
         let expected = "01000000000000000120000000000000006736333962666336383662616131393337336336396366666466326564623030000000000000000000000000010000000000000000000000801a0600000000000000000000000000014000000000000000626161636531396232663935353334333438353936363865303738323164323633656236316635313132626434633533653534643635653032396438383831360600000000000000000000000000000000";
         test_tx_matches_expected(&payment_tx_2, expected);

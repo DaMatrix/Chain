@@ -207,7 +207,7 @@ pub fn get_tx_with_out_point<'a>(
 ) -> impl Iterator<Item = (OutPoint, &'a Transaction)> {
     txs.map(|(hash, tx)| (hash, tx, &tx.outputs))
         .flat_map(|(hash, tx, outs)| outs.iter().enumerate().map(move |(idx, _)| (hash, idx, tx)))
-        .map(|(hash, idx, tx)| (OutPoint::new(hash.clone(), idx as i32), tx))
+        .map(|(hash, idx, tx)| (OutPoint::new_from_hash(hash.parse().unwrap(), idx as u32), tx))
 }
 
 /// Get all the OutPoint and Transaction from the (hash,transactions)
@@ -231,7 +231,7 @@ pub fn get_tx_out_with_out_point<'a>(
 ) -> impl Iterator<Item = (OutPoint, &'a TxOut)> {
     txs.map(|(hash, tx)| (hash, tx.outputs.iter()))
         .flat_map(|(hash, outs)| outs.enumerate().map(move |(idx, txo)| (hash, idx, txo)))
-        .map(|(hash, idx, txo)| (OutPoint::new(hash.clone(), idx as i32), txo))
+        .map(|(hash, idx, txo)| (OutPoint::new_from_hash(hash.parse().unwrap(), idx as u32), txo))
 }
 
 /// Get all fee outputs from the (hash,transactions)
@@ -244,7 +244,7 @@ pub fn get_fees_with_out_point<'a>(
 ) -> impl Iterator<Item = (OutPoint, &'a TxOut)> {
     txs.map(|(hash, tx)| (hash, tx.fees.iter()))
         .flat_map(|(hash, outs)| outs.enumerate().map(move |(idx, txo)| (hash, idx, txo)))
-        .map(|(hash, idx, txo)| (OutPoint::new(hash.clone(), idx as i32), txo))
+        .map(|(hash, idx, txo)| (OutPoint::new_from_hash(hash.parse().unwrap(), idx as u32), txo))
 }
 
 /// Get all fee outputs from the (hash,transactions)
@@ -257,7 +257,7 @@ pub fn get_fees_with_out_point_cloned<'a>(
 ) -> impl Iterator<Item = (OutPoint, TxOut)> + 'a {
     txs.map(|(hash, tx)| (hash, tx.fees.iter()))
         .flat_map(|(hash, outs)| outs.enumerate().map(move |(idx, txo)| (hash, idx, txo)))
-        .map(|(hash, idx, txo)| (OutPoint::new(hash.clone(), idx as i32), txo.clone()))
+        .map(|(hash, idx, txo)| (OutPoint::new_from_hash(hash.parse().unwrap(), idx as u32), txo.clone()))
 }
 
 /// Get all the OutPoint and TxOut from the (hash,transactions)
@@ -684,16 +684,17 @@ mod tests {
     use crate::crypto::sign_ed25519::{self as sign, Signature};
     use crate::primitives::asset::{AssetValues, ItemAsset, TokenAmount};
     use crate::script::OpCodes;
+    use crate::utils::Placeholder;
     use crate::utils::script_utils::{tx_has_valid_p2sh_script, tx_outs_are_valid};
 
     fn test_construct_valid_inputs() -> (Vec<TxIn>, String, BTreeMap<OutPoint, (PublicKey, SecretKey)>) {
         let (_pk, sk) = sign::gen_keypair().unwrap();
         let (pk, _sk) = sign::gen_keypair().unwrap();
-        let t_hash = vec![0, 0, 0];
-        let signature = sign::sign_detached(&t_hash, &sk);
+        let t_hash = TxHash::placeholder();
+        let signature = sign::sign_detached(t_hash.as_ref(), &sk);
         let drs_block_hash = hex::encode(vec![1, 2, 3, 4, 5, 6]);
         let mut key_material = BTreeMap::new();
-        let prev_out = OutPoint::new(hex::encode(t_hash), 0);
+        let prev_out = OutPoint::new_from_hash(t_hash, 0);
 
         key_material.insert(prev_out.clone(), (pk, sk));
 
@@ -721,7 +722,7 @@ mod tests {
         let spending_tx_hash = construct_tx_hash(&p2sh_tx);
 
         let tx_const = TxConstructor {
-            previous_out: OutPoint::new(spending_tx_hash, 0),
+            previous_out: OutPoint::new_from_hash(spending_tx_hash.parse().unwrap(), 0),
             signatures: vec![],
             pub_keys: vec![],
         };
@@ -760,7 +761,7 @@ mod tests {
         let spending_tx_hash = construct_tx_hash(&burn_tx);
 
         let tx_const = TxConstructor {
-            previous_out: OutPoint::new(spending_tx_hash, 0),
+            previous_out: OutPoint::new_from_hash(spending_tx_hash.parse().unwrap(), 0),
             signatures: vec![],
             pub_keys: vec![],
         };
@@ -844,11 +845,11 @@ mod tests {
     fn test_token_onspend_with_fees() {
         let (_pk, sk) = sign::gen_keypair().unwrap();
         let (pk, _sk) = sign::gen_keypair().unwrap();
-        let t_hash = vec![0, 0, 0];
-        let signature = sign::sign_detached(&t_hash, &sk);
+        let t_hash = TxHash::placeholder();
+        let signature = sign::sign_detached(t_hash.as_ref(), &sk);
         let tokens = TokenAmount(400000);
         let fees = TokenAmount(1000);
-        let prev_out = OutPoint::new(hex::encode(t_hash), 0);
+        let prev_out = OutPoint::new_from_hash(t_hash, 0);
         let mut key_material = BTreeMap::new();
         key_material.insert(prev_out.clone(), (pk, sk));
 
@@ -887,10 +888,10 @@ mod tests {
     fn test_item_onspend_with_fees() {
         let (_pk, sk) = sign::gen_keypair().unwrap();
         let (pk, _sk) = sign::gen_keypair().unwrap();
-        let t_hash = vec![0, 0, 0];
-        let signature = sign::sign_detached(&t_hash, &sk);
+        let t_hash = TxHash::placeholder();
+        let signature = sign::sign_detached(t_hash.as_ref(), &sk);
         let fees = TokenAmount(1000);
-        let prev_out = OutPoint::new(hex::encode(t_hash), 0);
+        let prev_out = OutPoint::new_from_hash(t_hash, 0);
         let mut key_material = BTreeMap::new();
         key_material.insert(prev_out.clone(), (pk, sk));
 
@@ -934,9 +935,9 @@ mod tests {
     fn test_item_onspend_metadata() {
         let (_pk, sk) = sign::gen_keypair().unwrap();
         let (pk, _sk) = sign::gen_keypair().unwrap();
-        let t_hash = vec![0, 0, 0];
-        let signature = sign::sign_detached(&t_hash, &sk);
-        let prev_out = OutPoint::new(hex::encode(t_hash), 0);
+        let t_hash = TxHash::placeholder();
+        let signature = sign::sign_detached(t_hash.as_ref(), &sk);
+        let prev_out = OutPoint::new_from_hash(t_hash, 0);
         let mut key_material = BTreeMap::new();
         key_material.insert(prev_out.clone(), (pk, sk));
 
@@ -978,16 +979,16 @@ mod tests {
     fn test_construct_valid_utxo_set() {
         let (pk, sk) = sign::gen_keypair().unwrap();
 
-        let t_hash_1 = hex::encode(vec![0, 0, 0]);
-        let signed = sign::sign_detached(t_hash_1.as_bytes(), &sk);
+        let t_hash_1 = TxHash::placeholder_indexed(1);
+        let signed = sign::sign_detached(t_hash_1.as_ref(), &sk);
 
-        let prev_out = OutPoint::new(hex::encode(t_hash_1), 0);
+        let prev_out = OutPoint::new_from_hash(t_hash_1, 0);
         let mut key_material = BTreeMap::new();
         key_material.insert(prev_out.clone(), (pk, sk.clone()));
 
 
         let tx_1 = TxConstructor {
-            previous_out: OutPoint::new("".to_string(), 0),
+            previous_out: prev_out,
             signatures: vec![signed],
             pub_keys: vec![pk],
         };
@@ -1005,7 +1006,7 @@ mod tests {
             &key_material
         );
         let tx_1_hash = construct_tx_hash(&payment_tx_1);
-        let tx_1_out_p = OutPoint::new(tx_1_hash.clone(), 0);
+        let tx_1_out_p = OutPoint::new_from_hash(tx_1_hash.parse().unwrap(), 0);
         key_material.insert(tx_1_out_p.clone(), (pk, sk));
 
         // Second tx referencing first
@@ -1023,7 +1024,7 @@ mod tests {
         let payment_tx_2 = construct_tx_core(tx_ins_2, tx_outs, None);
 
         let tx_2_hash = construct_tx_hash(&payment_tx_2);
-        let tx_2_out_p = OutPoint::new(tx_2_hash, 0);
+        let tx_2_out_p = OutPoint::new_from_hash(tx_2_hash.parse().unwrap(), 0);
 
         // BTreemap
         let mut btree = BTreeMap::new();
@@ -1042,9 +1043,9 @@ mod tests {
     fn test_construct_a_valid_dde_tx() {
         let (_pk, sk) = sign::gen_keypair().unwrap();
         let (pk, _sk) = sign::gen_keypair().unwrap();
-        let t_hash = hex::encode(vec![0, 0, 0]);
-        let signature = sign::sign_detached(t_hash.as_bytes(), &sk);
-        let prev_out = OutPoint::new(hex::encode(&t_hash), 0);
+        let t_hash = TxHash::placeholder();
+        let signature = sign::sign_detached(t_hash.as_ref(), &sk);
+        let prev_out = OutPoint::new_from_hash(t_hash, 0);
         let mut key_material = BTreeMap::new();
         key_material.insert(prev_out.clone(), (pk, sk));
 
@@ -1068,11 +1069,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let bytes = match bincode::serde::encode_to_vec(&tx_ins, bincode::config::legacy()) {
-            Ok(bytes) => bytes,
-            Err(_) => vec![],
-        };
-        let from_addr = hex::encode(bytes);
+        let from_addr = construct_tx_ins_address(&tx_ins);
 
         // DDE params
         let druid = hex::encode(vec![1, 2, 3, 4, 5]);
@@ -1124,7 +1121,7 @@ mod tests {
                 // constructors with enough money for amount and excess, caller responsibility.
                 construct_payment_tx_ins(vec![])
             };
-            key_material.insert(OutPoint::new("".to_string(), 0), (pk, sk));
+            key_material.insert(OutPoint::placeholder(), (pk, sk));
 
             let excess_tx_out =
                 TxOut::new_token_amount(sender_address_excess, amount - payment, None);
@@ -1240,9 +1237,9 @@ mod tests {
         // Arrange
         //
         let out_points = vec![
-            OutPoint::new("000000".to_owned(), 0),
-            OutPoint::new("000001".to_owned(), 0),
-            OutPoint::new("000002".to_owned(), 0),
+            OutPoint::placeholder_indexed(0),
+            OutPoint::placeholder_indexed(1),
+            OutPoint::placeholder_indexed(2),
         ];
 
         //
@@ -1254,9 +1251,9 @@ mod tests {
             .collect();
 
         let expected: Vec<String> = vec![
-            "927b3411743452e5e0d73e9e40a4fa3c842b3d00dabde7f9af7e44661ce02c88".to_owned(),
-            "754dc248d1c847e8a10c6f8ded6ccad96381551ebb162583aea2a86b9bb78dfa".to_owned(),
-            "5585c6f74d5c55f1ab457c31671822ba28c78c397cce1e11680b9f3852f96edb".to_owned(),
+            "08b4e1d78424bfa8dffffa499142b8e9f1edc4db4ec645d2fd2a60be2e8b3d9c".to_owned(),
+            "7e335ddf926a4fa5c7817df622858226e68b929cead312e446df16e93108125c".to_owned(),
+            "47dc4464616705a240fd94cd88991b2c2446d9e859162a2f900c4036ff85dac3".to_owned(),
         ];
 
         //
@@ -1315,9 +1312,9 @@ mod tests {
         ];
 
         let previous_out_points = vec![
-            OutPoint::new("000000".to_owned(), 0),
-            OutPoint::new("000001".to_owned(), 0),
-            OutPoint::new("000002".to_owned(), 0),
+            OutPoint::placeholder_indexed(0),
+            OutPoint::placeholder_indexed(1),
+            OutPoint::placeholder_indexed(2),
         ];
 
         //
@@ -1338,7 +1335,7 @@ mod tests {
             .collect();
 
         let expected =
-            "c8b62d379f07602956207ea473ce20d9752d24ad6e6cd43cb042d024d7c6a468".to_owned();
+            "f3d7b80f82f72260ba1b6235d608f0af871b7968ac1cde5ddf71a4a6b3385eec".to_owned();
         let actual = construct_tx_ins_address(&tx_ins);
 
         //

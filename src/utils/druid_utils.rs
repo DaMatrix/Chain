@@ -66,6 +66,7 @@ mod tests {
     use crate::primitives::asset::{Asset, ItemAsset, TokenAmount};
     use crate::primitives::druid::{DdeValues, DruidExpectation};
     use crate::primitives::transaction::*;
+    use crate::utils::Placeholder;
     use crate::utils::transaction_utils::*;
 
     /// Util function to create valid DDE asset tx's
@@ -75,7 +76,7 @@ mod tests {
         let from_addr = construct_tx_ins_address(&tx_input);
 
         let (pk, sk) = sign::gen_keypair().unwrap();
-        let prev_out = OutPoint::new("t_hash".to_string(), 0);
+        let prev_out = OutPoint::placeholder();
         let mut key_material = BTreeMap::new();
         key_material.insert(prev_out, (pk, sk));
 
@@ -168,7 +169,7 @@ mod tests {
                 TxOut::new_token_amount(sender_address_excess, amount - payment, None);
             
             let (pk, sk) = sign::gen_keypair().unwrap();
-            let prev_out = OutPoint::new("t_hash".to_string(), 0);
+            let prev_out = OutPoint::placeholder();
             key_material.insert(prev_out, (pk, sk));
 
             let expectation = DruidExpectation {

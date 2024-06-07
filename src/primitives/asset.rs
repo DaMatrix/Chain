@@ -142,7 +142,7 @@ impl Asset {
     pub fn with_fixed_hash(mut self, out_point: &OutPoint) -> Self {
         if let Asset::Item(ref mut item_asset) = self {
             if item_asset.genesis_hash.is_none() {
-                item_asset.genesis_hash = Some(&out_point.t_hash).cloned();
+                item_asset.genesis_hash = Some(out_point.t_hash.to_string());
             }
         }
         self

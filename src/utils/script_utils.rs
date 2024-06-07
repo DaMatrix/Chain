@@ -363,6 +363,7 @@ mod tests {
     use crate::primitives::asset::Asset;
     use crate::primitives::druid::DdeValues;
     use crate::primitives::transaction::OutPoint;
+    use crate::utils::Placeholder;
     use crate::utils::test_utils::generate_tx_with_ins_and_outs_assets;
     use crate::utils::transaction_utils::*;
 
@@ -2669,7 +2670,7 @@ mod tests {
             new_tx_in.script_signature = Script::multisig_validation(
                 m,
                 entry.pub_keys.len(),
-                hex::decode(&entry.previous_out.t_hash).unwrap(),
+                entry.previous_out.t_hash.as_ref().to_vec(),
                 entry.signatures,
                 entry.pub_keys,
             );
@@ -2688,7 +2689,8 @@ mod tests {
         for entry in tx_values {
             let mut new_tx_in = TxIn::new();
             new_tx_in.script_signature = Script::member_multisig(
-                hex::decode(&entry.previous_out.t_hash).unwrap(),
+                // TODO: is this check_data correct?
+                entry.previous_out.t_hash.as_ref().to_vec(),
                 entry.pub_keys[0],
                 entry.signatures[0],
             );
@@ -2740,11 +2742,11 @@ mod tests {
     /// Checks that correct member multisig scripts are validated as such
     fn test_pass_member_multisig_valid() {
         let (pk, sk) = sign::gen_keypair().unwrap();
-        let t_hash = hex::encode(vec![0, 0, 0]);
-        let signature = sign::sign_detached(t_hash.as_bytes(), &sk);
+        let t_hash = TxHash::placeholder();
+        let signature = sign::sign_detached(hex::encode(t_hash.as_ref()).as_bytes(), &sk);
 
         let tx_const = TxConstructor {
-            previous_out: OutPoint::new(t_hash, 0),
+            previous_out: OutPoint::new_from_hash(t_hash, 0),
             signatures: vec![signature],
             pub_keys: vec![pk],
         };
@@ -2759,11 +2761,11 @@ mod tests {
     fn test_fail_member_multisig_invalid() {
         let (_pk, sk) = sign::gen_keypair().unwrap();
         let (pk, _sk) = sign::gen_keypair().unwrap();
-        let t_hash = hex::encode(vec![0, 0, 0]);
-        let signature = sign::sign_detached(t_hash.as_bytes(), &sk);
+        let t_hash = TxHash::placeholder();
+        let signature = sign::sign_detached(t_hash.as_ref(), &sk);
 
         let tx_const = TxConstructor {
-            previous_out: OutPoint::new(t_hash, 0),
+            previous_out: OutPoint::new_from_hash(t_hash, 0),
             signatures: vec![signature],
             pub_keys: vec![pk],
         };
@@ -2777,10 +2779,7 @@ mod tests {
     /// Checks that correct p2pkh transaction signatures are validated as such
     fn test_pass_p2pkh_sig_valid() {
         let (pk, sk) = sign::gen_keypair().unwrap();
-        let outpoint = OutPoint {
-            t_hash: hex::encode(vec![0, 0, 0]),
-            n: 0,
-        };
+        let outpoint = OutPoint::placeholder();
         let mut key_material = BTreeMap::new();
         key_material.insert(outpoint.clone(), (pk, sk));
 
@@ -2809,10 +2808,7 @@ mod tests {
     fn test_fail_p2pkh_sig_invalid() {
         let (pk, sk) = sign::gen_keypair().unwrap();
         let (second_pk, _s) = sign::gen_keypair().unwrap();
-        let outpoint = OutPoint {
-            t_hash: hex::encode(vec![0, 0, 0]),
-            n: 0,
-        };
+        let outpoint = OutPoint::placeholder();
 
         let hash_to_sign = construct_tx_in_signable_hash(&outpoint);
         let signature = sign::sign_detached(hash_to_sign.as_bytes(), &sk);
@@ -2837,10 +2833,7 @@ mod tests {
     /// Checks that invalid p2pkh transaction signatures are validated as such
     fn test_fail_p2pkh_sig_script_empty() {
         let (pk, sk) = sign::gen_keypair().unwrap();
-        let outpoint = OutPoint {
-            t_hash: hex::encode(vec![0, 0, 0]),
-            n: 0,
-        };
+        let outpoint = OutPoint::placeholder();
 
         let hash_to_sign = construct_tx_in_signable_hash(&outpoint);
         let signature = sign::sign_detached(hash_to_sign.as_bytes(), &sk);
@@ -2874,10 +2867,7 @@ mod tests {
     /// Checks that invalid p2pkh transaction signatures are validated as such
     fn test_fail_p2pkh_sig_script_invalid_struct() {
         let (pk, sk) = sign::gen_keypair().unwrap();
-        let outpoint = OutPoint {
-            t_hash: hex::encode(vec![0, 0, 0]),
-            n: 0,
-        };
+        let outpoint = OutPoint::placeholder();
 
         let hash_to_sign = construct_tx_in_signable_hash(&outpoint);
         let signature = sign::sign_detached(hash_to_sign.as_bytes(), &sk);
@@ -2917,14 +2907,14 @@ mod tests {
         let (first_pk, first_sk) = sign::gen_keypair().unwrap();
         let (second_pk, second_sk) = sign::gen_keypair().unwrap();
         let (third_pk, third_sk) = sign::gen_keypair().unwrap();
-        let check_data = hex::encode(vec![0, 0, 0]);
+        let check_data = TxHash::placeholder();
 
         let m = 2;
-        let first_sig = sign::sign_detached(check_data.as_bytes(), &first_sk);
-        let second_sig = sign::sign_detached(check_data.as_bytes(), &second_sk);
+        let first_sig = sign::sign_detached(hex::encode(check_data.as_ref()).as_bytes(), &first_sk);
+        let second_sig = sign::sign_detached(hex::encode(check_data.as_ref()).as_bytes(), &second_sk);
 
         let tx_const = TxConstructor {
-            previous_out: OutPoint::new(check_data, 0),
+            previous_out: OutPoint::new_from_hash(check_data, 0),
             signatures: vec![first_sig, second_sig],
             pub_keys: vec![first_pk, second_pk, third_pk],
         };
@@ -2964,8 +2954,7 @@ mod tests {
         // Arrange
         //
         let (pk, sk) = sign::gen_keypair().unwrap();
-        let tx_hash = hex::encode(vec![0, 0, 0]);
-        let tx_outpoint = OutPoint::new(tx_hash, 0);
+        let tx_outpoint = OutPoint::placeholder();
         let script_public_key = construct_address(&pk);
         let tx_in_previous_out =
             TxOut::new_token_amount(script_public_key.clone(), TokenAmount(5), locktime);
@@ -3189,11 +3178,11 @@ mod tests {
     fn test_fail_interpret_valid() {
         let (_pk, sk) = sign::gen_keypair().unwrap();
         let (pk, _sk) = sign::gen_keypair().unwrap();
-        let t_hash = hex::encode(vec![0, 0, 0]);
-        let signature = sign::sign_detached(t_hash.as_bytes(), &sk);
+        let t_hash = TxHash::placeholder();
+        let signature = sign::sign_detached(t_hash.as_ref(), &sk);
 
         let tx_const = TxConstructor {
-            previous_out: OutPoint::new(t_hash, 0),
+            previous_out: OutPoint::new_from_hash(t_hash, 0),
             signatures: vec![signature],
             pub_keys: vec![pk],
         };
@@ -3207,11 +3196,11 @@ mod tests {
     /// Checks that interpret scripts are validated as such
     fn test_pass_interpret_valid() {
         let (pk, sk) = sign::gen_keypair().unwrap();
-        let t_hash = hex::encode(vec![0, 0, 0]);
-        let signature = sign::sign_detached(t_hash.as_bytes(), &sk);
+        let t_hash = TxHash::placeholder();
+        let signature = sign::sign_detached(hex::encode(t_hash.as_ref()).as_bytes(), &sk);
 
         let tx_const = TxConstructor {
-            previous_out: OutPoint::new(t_hash, 0),
+            previous_out: OutPoint::new_from_hash(t_hash, 0),
             signatures: vec![signature],
             pub_keys: vec![pk],
         };
