@@ -9,8 +9,7 @@ use crate::primitives::druid::DruidExpectation;
 use crate::primitives::transaction::*;
 use crate::script::interface_ops::*;
 use crate::script::lang::{ConditionStack, Script, Stack};
-use crate::script::{OpCodes, StackEntry};
-use crate::utils::error_utils::*;
+use crate::script::{OpCodes, ScriptError, StackEntry};
 use crate::utils::transaction_utils::{
     construct_address, construct_tx_hash, construct_tx_in_out_signable_hash,
     construct_tx_in_signable_asset_hash, construct_tx_in_signable_hash,
@@ -391,43 +390,38 @@ mod tests {
         /// op_if([1], {0,None}) -> [], {1,None}
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
-        let mut cond_stack = ConditionStack::new();
         let mut v: Vec<StackEntry> = vec![];
-        op_if(&mut stack, &mut cond_stack);
+        op_if(&mut stack);
         assert_eq!(stack.main_stack, v);
-        assert_eq!(cond_stack.size, 1);
-        assert_eq!(cond_stack.first_false_pos, None);
+        assert_eq!(stack.cond_stack.size, 1);
+        assert_eq!(stack.cond_stack.first_false_pos, None);
         /// op_if([0], {0,None}) -> [], {1,0}
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(0));
-        let mut cond_stack = ConditionStack::new();
         let mut v: Vec<StackEntry> = vec![];
-        op_if(&mut stack, &mut cond_stack);
+        op_if(&mut stack);
         assert_eq!(stack.main_stack, v);
-        assert_eq!(cond_stack.size, 1);
-        assert_eq!(cond_stack.first_false_pos, Some(0));
+        assert_eq!(stack.cond_stack.size, 1);
+        assert_eq!(stack.cond_stack.first_false_pos, Some(0));
         /// op_if([1], {1,0}) -> [1], {2,0}
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
-        let mut cond_stack = ConditionStack::new();
-        cond_stack.size = 1;
-        cond_stack.first_false_pos = Some(0);
+        stack.cond_stack.size = 1;
+        stack.cond_stack.first_false_pos = Some(0);
         let mut v: Vec<StackEntry> = vec![StackEntry::Num(1)];
-        op_if(&mut stack, &mut cond_stack);
+        op_if(&mut stack);
         assert_eq!(stack.main_stack, v);
-        assert_eq!(cond_stack.size, 2);
-        assert_eq!(cond_stack.first_false_pos, Some(0));
+        assert_eq!(stack.cond_stack.size, 2);
+        assert_eq!(stack.cond_stack.first_false_pos, Some(0));
         /// error item type
         let mut stack = Stack::new();
         stack.push(StackEntry::Bytes(Vec::new()));
-        let mut cond_stack = ConditionStack::new();
-        let b = op_if(&mut stack, &mut cond_stack);
-        assert!(!b);
+        let b = op_if(&mut stack);
+        assert_eq!(b, Err(ScriptError::ItemType));
         /// error num items
         let mut stack = Stack::new();
-        let mut cond_stack = ConditionStack::new();
-        let b = op_if(&mut stack, &mut cond_stack);
-        assert!(!b)
+        let b = op_if(&mut stack);
+        assert_eq!(b, Err(ScriptError::StackEmpty))
     }
 
     #[test]
@@ -436,103 +430,98 @@ mod tests {
         /// op_notif([0], {0,None}) -> [], {1,None}
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(0));
-        let mut cond_stack = ConditionStack::new();
         let mut v: Vec<StackEntry> = vec![];
-        op_notif(&mut stack, &mut cond_stack);
+        op_notif(&mut stack);
         assert_eq!(stack.main_stack, v);
-        assert_eq!(cond_stack.size, 1);
-        assert_eq!(cond_stack.first_false_pos, None);
+        assert_eq!(stack.cond_stack.size, 1);
+        assert_eq!(stack.cond_stack.first_false_pos, None);
         /// op_notif([1], {0,None}) -> [], {1,0}
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
-        let mut cond_stack = ConditionStack::new();
         let mut v: Vec<StackEntry> = vec![];
-        op_notif(&mut stack, &mut cond_stack);
+        op_notif(&mut stack);
         assert_eq!(stack.main_stack, v);
-        assert_eq!(cond_stack.size, 1);
-        assert_eq!(cond_stack.first_false_pos, Some(0));
+        assert_eq!(stack.cond_stack.size, 1);
+        assert_eq!(stack.cond_stack.first_false_pos, Some(0));
         /// op_notif([0], {1,0}) -> [0], {2,0}
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(0));
-        let mut cond_stack = ConditionStack::new();
-        cond_stack.size = 1;
-        cond_stack.first_false_pos = Some(0);
+        stack.cond_stack.size = 1;
+        stack.cond_stack.first_false_pos = Some(0);
         let mut v: Vec<StackEntry> = vec![StackEntry::Num(0)];
-        op_notif(&mut stack, &mut cond_stack);
+        op_notif(&mut stack);
         assert_eq!(stack.main_stack, v);
-        assert_eq!(cond_stack.size, 2);
-        assert_eq!(cond_stack.first_false_pos, Some(0));
+        assert_eq!(stack.cond_stack.size, 2);
+        assert_eq!(stack.cond_stack.first_false_pos, Some(0));
         /// error item type
         let mut stack = Stack::new();
         stack.push(StackEntry::Bytes(Vec::new()));
-        let mut cond_stack = ConditionStack::new();
-        let b = op_notif(&mut stack, &mut cond_stack);
-        assert!(!b);
+        let b = op_notif(&mut stack);
+        assert_eq!(b, Err(ScriptError::ItemType));
         /// error num items
         let mut stack = Stack::new();
-        let mut cond_stack = ConditionStack::new();
-        let b = op_notif(&mut stack, &mut cond_stack);
-        assert!(!b)
+        let b = op_notif(&mut stack);
+        assert_eq!(b, Err(ScriptError::StackEmpty))
     }
 
     #[test]
     /// Test OP_ELSE
     fn test_else() {
         /// op_else({1,None}) -> {1,0}
-        let mut cond_stack = ConditionStack::new();
-        cond_stack.size = 1;
-        cond_stack.first_false_pos = None;
-        op_else(&mut cond_stack);
-        assert_eq!(cond_stack.size, 1);
-        assert_eq!(cond_stack.first_false_pos, Some(0));
+        let mut stack = Stack::new();
+        stack.cond_stack.size = 1;
+        stack.cond_stack.first_false_pos = None;
+        op_else(&mut stack);
+        assert_eq!(stack.cond_stack.size, 1);
+        assert_eq!(stack.cond_stack.first_false_pos, Some(0));
         /// op_else({1,0}) -> {1,None}
-        let mut cond_stack = ConditionStack::new();
-        cond_stack.size = 1;
-        cond_stack.first_false_pos = Some(0);
-        op_else(&mut cond_stack);
-        assert_eq!(cond_stack.size, 1);
-        assert_eq!(cond_stack.first_false_pos, None);
+        let mut stack = Stack::new();
+        stack.cond_stack.size = 1;
+        stack.cond_stack.first_false_pos = Some(0);
+        op_else(&mut stack);
+        assert_eq!(stack.cond_stack.size, 1);
+        assert_eq!(stack.cond_stack.first_false_pos, None);
         /// op_else({2,0}) -> {2,0}
-        let mut cond_stack = ConditionStack::new();
-        cond_stack.size = 2;
-        cond_stack.first_false_pos = Some(0);
-        op_else(&mut cond_stack);
-        assert_eq!(cond_stack.size, 2);
-        assert_eq!(cond_stack.first_false_pos, Some(0));
+        let mut stack = Stack::new();
+        stack.cond_stack.size = 2;
+        stack.cond_stack.first_false_pos = Some(0);
+        op_else(&mut stack);
+        assert_eq!(stack.cond_stack.size, 2);
+        assert_eq!(stack.cond_stack.first_false_pos, Some(0));
         /// empty condition stack
-        let mut cond_stack = ConditionStack::new();
-        let b = op_else(&mut cond_stack);
-        assert!(!b)
+        let mut stack = Stack::new();
+        let b = op_else(&mut stack);
+        assert_eq!(b, Err(ScriptError::EmptyCondition))
     }
 
     #[test]
     /// Test OP_ENDIF
     fn test_endif() {
         /// op_endif({1,None}) -> {0,None}
-        let mut cond_stack = ConditionStack::new();
-        cond_stack.size = 1;
-        cond_stack.first_false_pos = None;
-        op_endif(&mut cond_stack);
-        assert_eq!(cond_stack.size, 0);
-        assert_eq!(cond_stack.first_false_pos, None);
+        let mut stack = Stack::new();
+        stack.cond_stack.size = 1;
+        stack.cond_stack.first_false_pos = None;
+        op_endif(&mut stack);
+        assert_eq!(stack.cond_stack.size, 0);
+        assert_eq!(stack.cond_stack.first_false_pos, None);
         /// op_endif({1,0}) -> {0,None}
-        let mut cond_stack = ConditionStack::new();
-        cond_stack.size = 1;
-        cond_stack.first_false_pos = Some(0);
-        op_endif(&mut cond_stack);
-        assert_eq!(cond_stack.size, 0);
-        assert_eq!(cond_stack.first_false_pos, None);
+        let mut stack = Stack::new();
+        stack.cond_stack.size = 1;
+        stack.cond_stack.first_false_pos = Some(0);
+        op_endif(&mut stack);
+        assert_eq!(stack.cond_stack.size, 0);
+        assert_eq!(stack.cond_stack.first_false_pos, None);
         /// op_endif({2,0}) -> {1,0}
-        let mut cond_stack = ConditionStack::new();
-        cond_stack.size = 2;
-        cond_stack.first_false_pos = Some(0);
-        op_endif(&mut cond_stack);
-        assert_eq!(cond_stack.size, 1);
-        assert_eq!(cond_stack.first_false_pos, Some(0));
+        let mut stack = Stack::new();
+        stack.cond_stack.size = 2;
+        stack.cond_stack.first_false_pos = Some(0);
+        op_endif(&mut stack);
+        assert_eq!(stack.cond_stack.size, 1);
+        assert_eq!(stack.cond_stack.first_false_pos, Some(0));
         /// empty condition stack
-        let mut cond_stack = ConditionStack::new();
-        let b = op_endif(&mut cond_stack);
-        assert!(!b)
+        let mut stack = Stack::new();
+        let b = op_endif(&mut stack);
+        assert_eq!(b, Err(ScriptError::EmptyCondition))
     }
 
     #[test]
@@ -548,11 +537,11 @@ mod tests {
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(0));
         let b = op_verify(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::Verify));
         /// op_verify([]) -> fail
         let mut stack = Stack::new();
         let b = op_verify(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty))
     }
 
     #[test]
@@ -562,11 +551,11 @@ mod tests {
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
         let b = op_burn(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::Burn));
         /// op_burn([]) -> fail
         let mut stack = Stack::new();
         let b = op_burn(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::Burn))
     }
 
     /*---- STACK OPS ----*/
@@ -585,7 +574,7 @@ mod tests {
         /// op_toaltstack([], []) -> fail
         let mut stack = Stack::new();
         let b = op_toaltstack(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty))
     }
 
     #[test]
@@ -602,7 +591,7 @@ mod tests {
         /// op_fromaltstack([], []) -> fail
         let mut stack = Stack::new();
         let b = op_fromaltstack(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty))
     }
 
     #[test]
@@ -620,7 +609,7 @@ mod tests {
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
         let b = op_2drop(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty))
     }
 
     #[test]
@@ -644,7 +633,7 @@ mod tests {
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
         let b = op_2dup(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty))
     }
 
     #[test]
@@ -670,7 +659,7 @@ mod tests {
             stack.push(StackEntry::Num(i));
         }
         let b = op_3dup(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty))
     }
 
     #[test]
@@ -696,7 +685,7 @@ mod tests {
             stack.push(StackEntry::Num(i));
         }
         let b = op_2over(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty))
     }
 
     #[test]
@@ -722,7 +711,7 @@ mod tests {
             stack.push(StackEntry::Num(i));
         }
         let b = op_2rot(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty))
     }
 
     #[test]
@@ -748,7 +737,7 @@ mod tests {
             stack.push(StackEntry::Num(i));
         }
         let b = op_2swap(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty))
     }
 
     #[test]
@@ -772,7 +761,7 @@ mod tests {
         /// op_ifdup([]) -> fail
         let mut stack = Stack::new();
         let b = op_ifdup(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty))
     }
 
     #[test]
@@ -809,7 +798,7 @@ mod tests {
         /// op_drop([]) -> fail
         let mut stack = Stack::new();
         let b = op_drop(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty))
     }
 
     #[test]
@@ -827,7 +816,7 @@ mod tests {
         /// op_dup([]) -> fail
         let mut stack = Stack::new();
         let b = op_dup(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty))
     }
 
     #[test]
@@ -845,7 +834,7 @@ mod tests {
         let mut stack = Stack::new();
         let mut v: Vec<StackEntry> = vec![StackEntry::Num(1)];
         let b = op_nip(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty))
     }
 
     #[test]
@@ -867,7 +856,7 @@ mod tests {
         let mut stack = Stack::new();
         let mut v: Vec<StackEntry> = vec![StackEntry::Num(1)];
         let b = op_over(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty))
     }
 
     #[test]
@@ -901,22 +890,22 @@ mod tests {
         assert_eq!(stack.main_stack, v);
         /// op_pick([1]) -> fail
         let mut stack = Stack::new();
-        let mut v: Vec<StackEntry> = vec![StackEntry::Num(1)];
+        stack.push(StackEntry::Num(1));
         let b = op_pick(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::StackIndexBounds(1, 0)));
         /// op_pick([1,"hello"]) -> fail
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
         stack.push(StackEntry::Bytes("hello".as_bytes().to_vec()));
         let b = op_pick(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::ItemType));
         /// op_pick([1,1]) -> fail
         let mut stack = Stack::new();
         for i in 1..=2 {
             stack.push(StackEntry::Num(i));
         }
         let b = op_pick(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackIndexBounds(2, 1)));
     }
 
     #[test]
@@ -949,22 +938,22 @@ mod tests {
         assert_eq!(stack.main_stack, v);
         /// op_roll([1]) -> fail
         let mut stack = Stack::new();
-        let mut v: Vec<StackEntry> = vec![StackEntry::Num(1)];
+        stack.push(StackEntry::Num(1));
         let b = op_roll(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::StackIndexBounds(1, 0)));
         /// op_roll([1,"hello"]) -> fail
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
         stack.push(StackEntry::Bytes("hello".as_bytes().to_vec()));
         let b = op_roll(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::ItemType));
         /// op_roll([1,1]) -> fail
         let mut stack = Stack::new();
         for i in 1..=2 {
             stack.push(StackEntry::Num(i));
         }
         let b = op_roll(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackIndexBounds(2, 1)));
     }
 
     #[test]
@@ -988,7 +977,7 @@ mod tests {
             stack.push(StackEntry::Num(i));
         }
         let b = op_rot(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1006,7 +995,7 @@ mod tests {
         let mut stack = Stack::new();
         let mut v: Vec<StackEntry> = vec![StackEntry::Num(1)];
         let b = op_swap(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1027,7 +1016,7 @@ mod tests {
         let mut stack = Stack::new();
         let mut v: Vec<StackEntry> = vec![StackEntry::Num(1)];
         let b = op_tuck(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     /*---- SPLICE OPS ----*/
@@ -1058,18 +1047,18 @@ mod tests {
         }
         stack.push(StackEntry::Bytes(s.as_bytes().to_vec()));
         let b = op_cat(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::ItemSize(1 + MAX_SCRIPT_ITEM_SIZE as usize, MAX_SCRIPT_ITEM_SIZE as usize)));
         /// op_cat(["hello"]) -> fail
         let mut stack = Stack::new();
         stack.push(StackEntry::Bytes("hello".as_bytes().to_vec()));
         let b = op_cat(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::StackEmpty));
         /// op_cat(["hello", 1]) -> fail
         let mut stack = Stack::new();
         stack.push(StackEntry::Bytes("hello".as_bytes().to_vec()));
         stack.push(StackEntry::Num(1));
         let b = op_cat(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::ItemType));
     }
 
     #[test]
@@ -1107,34 +1096,34 @@ mod tests {
         stack.push(StackEntry::Num(5));
         stack.push(StackEntry::Num(0));
         let b = op_substr(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::SliceBounds(5, 0, 5)));
         /// op_substr(["hello",1,5]) -> fail
         let mut stack = Stack::new();
         stack.push(StackEntry::Bytes("hello".as_bytes().to_vec()));
         stack.push(StackEntry::Num(1));
         stack.push(StackEntry::Num(5));
         let b = op_substr(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::SliceBounds(1, 5, 5)));
         /// op_substr(["hello",1]) -> fail
         let mut stack = Stack::new();
         stack.push(StackEntry::Bytes("hello".as_bytes().to_vec()));
         stack.push(StackEntry::Num(1));
         let b = op_substr(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::ItemType));
         /// op_substr(["hello",1,usize::MAX]) -> fail
         let mut stack = Stack::new();
         stack.push(StackEntry::Bytes("hello".as_bytes().to_vec()));
         stack.push(StackEntry::Num(1));
         stack.push(StackEntry::Num(usize::MAX));
         let b = op_substr(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::SliceBounds(1, usize::MAX, 5)));
         /// op_substr(["hello",1,""]) -> fail
         let mut stack = Stack::new();
         stack.push(StackEntry::Bytes("hello".as_bytes().to_vec()));
         stack.push(StackEntry::Num(1));
         stack.push(StackEntry::Bytes("".as_bytes().to_vec()));
         let b = op_substr(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::ItemType));
     }
 
     #[test]
@@ -1166,12 +1155,12 @@ mod tests {
         stack.push(StackEntry::Bytes("hello".as_bytes().to_vec()));
         stack.push(StackEntry::Bytes("".as_bytes().to_vec()));
         let b = op_left(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::ItemType));
         /// op_left(["hello"]) -> fail
         let mut stack = Stack::new();
         stack.push(StackEntry::Bytes("hello".as_bytes().to_vec()));
         let b = op_left(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::ItemType));
     }
 
     #[test]
@@ -1203,12 +1192,12 @@ mod tests {
         stack.push(StackEntry::Bytes("hello".as_bytes().to_vec()));
         stack.push(StackEntry::Bytes("".as_bytes().to_vec()));
         let b = op_right(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::ItemType));
         /// op_right(["hello"]) -> fail
         let mut stack = Stack::new();
         stack.push(StackEntry::Bytes("hello".as_bytes().to_vec()));
         let b = op_right(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::ItemType));
     }
 
     #[test]
@@ -1229,13 +1218,13 @@ mod tests {
         assert_eq!(stack.main_stack, v);
         /// op_size([1]) -> fail
         let mut stack = Stack::new();
-        let mut v: Vec<StackEntry> = vec![StackEntry::Num(1)];
+        stack.push(StackEntry::Num(1));
         let b = op_size(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::ItemType));
         /// op_size([]) -> fail
         let mut stack = Stack::new();
         let b = op_size(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     /*---- BITWISE LOGIC OPS ----*/
@@ -1252,7 +1241,7 @@ mod tests {
         /// op_invert([]) -> fail
         let mut stack = Stack::new();
         let b = op_invert(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1270,7 +1259,7 @@ mod tests {
         let mut stack = Stack::new();
         let mut v: Vec<StackEntry> = vec![StackEntry::Num(1)];
         let b = op_and(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1288,7 +1277,7 @@ mod tests {
         let mut stack = Stack::new();
         let mut v: Vec<StackEntry> = vec![StackEntry::Num(1)];
         let b = op_or(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1314,7 +1303,7 @@ mod tests {
         let mut stack = Stack::new();
         let mut v: Vec<StackEntry> = vec![StackEntry::Num(1)];
         let b = op_xor(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1340,7 +1329,7 @@ mod tests {
         let mut stack = Stack::new();
         let mut v: Vec<StackEntry> = vec![StackEntry::Num(1)];
         let b = op_equal(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1360,12 +1349,12 @@ mod tests {
             stack.push(StackEntry::Num(i));
         }
         let b = op_equalverify(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::ItemsNotEqual));
         /// op_equalverify([1]) -> fail
         let mut stack = Stack::new();
         let mut v: Vec<StackEntry> = vec![StackEntry::Num(1)];
         let b = op_equalverify(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     /*---- ARITHMETIC OPS ----*/
@@ -1383,11 +1372,11 @@ mod tests {
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(usize::MAX));
         let b = op_1add(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::Overflow));
         /// op_1add([]) -> fail
         let mut stack = Stack::new();
         let b = op_1add(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1401,13 +1390,13 @@ mod tests {
         assert_eq!(stack.main_stack, v);
         /// op_1sub([0]) -> fail
         let mut stack = Stack::new();
-        let mut v: Vec<StackEntry> = vec![StackEntry::Num(0)];
+        stack.push(StackEntry::Num(0));
         let b = op_1sub(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::Overflow));
         /// op_1sub([]) -> fail
         let mut stack = Stack::new();
         let b = op_1sub(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1423,11 +1412,11 @@ mod tests {
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(usize::MAX));
         let b = op_2mul(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::Overflow));
         /// op_2mul([]) -> fail
         let mut stack = Stack::new();
         let b = op_2mul(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1442,7 +1431,7 @@ mod tests {
         /// op_2div([]) -> fail
         let mut stack = Stack::new();
         let b = op_2div(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1463,7 +1452,7 @@ mod tests {
         /// op_not([]) -> fail
         let mut stack = Stack::new();
         let b = op_not(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1484,7 +1473,7 @@ mod tests {
         /// op_0notequal([]) -> fail
         let mut stack = Stack::new();
         let b = op_0notequal(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1503,12 +1492,12 @@ mod tests {
         stack.push(StackEntry::Num(1));
         stack.push(StackEntry::Num(usize::MAX));
         let b = op_add(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::Overflow));
         /// op_add([1]) -> fail
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
         let b = op_add(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1526,12 +1515,12 @@ mod tests {
         stack.push(StackEntry::Num(0));
         stack.push(StackEntry::Num(1));
         let b = op_sub(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::Overflow));
         /// op_sub([1]) -> fail
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
         let b = op_sub(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1550,12 +1539,12 @@ mod tests {
         stack.push(StackEntry::Num(2));
         stack.push(StackEntry::Num(usize::MAX));
         let b = op_mul(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::Overflow));
         /// op_mul([1]) -> fail
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
         let b = op_mul(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1574,12 +1563,12 @@ mod tests {
         stack.push(StackEntry::Num(1));
         stack.push(StackEntry::Num(0));
         let b = op_div(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::DivideByZero));
         /// op_div([1]) -> fail
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
         let b = op_div(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1598,12 +1587,12 @@ mod tests {
         stack.push(StackEntry::Num(1));
         stack.push(StackEntry::Num(0));
         let b = op_mod(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::DivideByZero));
         /// op_mod([1]) -> fail
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
         let b = op_mod(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1622,12 +1611,12 @@ mod tests {
         stack.push(StackEntry::Num(1));
         stack.push(StackEntry::Num(64));
         let b = op_lshift(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::DivideByZero));
         /// op_lshift([1]) -> fail
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
         let b = op_lshift(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1646,12 +1635,12 @@ mod tests {
         stack.push(StackEntry::Num(1));
         stack.push(StackEntry::Num(64));
         let b = op_rshift(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::DivideByZero));
         /// op_rshift([1]) -> fail
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
         let b = op_rshift(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1677,7 +1666,7 @@ mod tests {
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
         let b = op_booland(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1703,7 +1692,7 @@ mod tests {
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
         let b = op_boolor(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1729,7 +1718,7 @@ mod tests {
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
         let b = op_numequal(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1749,12 +1738,12 @@ mod tests {
             stack.push(StackEntry::Num(i));
         }
         let b = op_numequalverify(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::ItemsNotEqual));
         /// op_numequalverify([1]) -> fail
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
         let b = op_numequalverify(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1780,7 +1769,7 @@ mod tests {
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
         let b = op_numnotequal(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1806,7 +1795,7 @@ mod tests {
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
         let b = op_lessthan(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1831,7 +1820,7 @@ mod tests {
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
         let b = op_greaterthan(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1856,7 +1845,7 @@ mod tests {
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
         let b = op_lessthanorequal(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1882,7 +1871,7 @@ mod tests {
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
         let b = op_greaterthanorequal(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1900,7 +1889,7 @@ mod tests {
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
         let b = op_min(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1918,7 +1907,7 @@ mod tests {
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
         let b = op_max(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -1946,7 +1935,7 @@ mod tests {
             stack.push(StackEntry::Num(i));
         }
         let b = op_within(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     /*---- CRYPTO OPS ----*/
@@ -1983,11 +1972,11 @@ mod tests {
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(1));
         let b = op_sha3(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::ItemType));
         /// op_sha3([]) -> fail
         let mut stack = Stack::new();
         let b = op_sha3(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -2003,7 +1992,7 @@ mod tests {
         /// op_hash256([]) -> fail
         let mut stack = Stack::new();
         let b = op_hash256(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -2047,7 +2036,7 @@ mod tests {
         stack.push(StackEntry::Signature(sig));
         stack.push(StackEntry::PubKey(pk));
         let b = op_checksig(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -2072,7 +2061,7 @@ mod tests {
         stack.push(StackEntry::Signature(sig));
         stack.push(StackEntry::PubKey(pk));
         let b = op_checksigverify(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::Verify));
         /// wrong public key
         /// op_checksig([msg,sig,pk']) -> fail
         let (pk, sk) = sign::gen_keypair().unwrap();
@@ -2082,14 +2071,14 @@ mod tests {
         stack.push(StackEntry::Signature(sig));
         stack.push(StackEntry::PubKey(pk));
         let b = op_checksigverify(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::Verify));
         /// no message
         /// op_checksigverify([sig,pk]) -> fail
         let mut stack = Stack::new();
         stack.push(StackEntry::Signature(sig));
         stack.push(StackEntry::PubKey(pk));
         let b = op_checksigverify(&mut stack);
-        assert!(!b)
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -2201,7 +2190,7 @@ mod tests {
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(MAX_PUB_KEYS_PER_MULTISIG as usize + ONE));
         let b = op_checkmultisig(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::NumPubkeys));
         /// not enough pubkeys
         /// op_checkmultisig([pk1,pk2,3]) -> fail
         let mut stack = Stack::new();
@@ -2209,7 +2198,7 @@ mod tests {
         stack.push(StackEntry::PubKey(pk2));
         stack.push(StackEntry::Num(3));
         let b = op_checkmultisig(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::NumPubkeys));
         /// too many signatures
         /// op_checkmultisig([4,pk1,pk2,pk3,3]) -> fail
         let mut stack = Stack::new();
@@ -2219,7 +2208,7 @@ mod tests {
         stack.push(StackEntry::PubKey(pk3));
         stack.push(StackEntry::Num(3));
         let b = op_checkmultisig(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::NumSignatures));
         /// not enough signatures
         /// op_checkmultisig([sig1,2,pk1,pk2,pk3,3]) -> fail
         let mut stack = Stack::new();
@@ -2230,7 +2219,7 @@ mod tests {
         stack.push(StackEntry::PubKey(pk3));
         stack.push(StackEntry::Num(3));
         let b = op_checkmultisig(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::NumSignatures));
         /// no message
         /// op_checkmultisig([sig1,sig2,2,pk1,pk2,pk3,3]) -> fail
         let mut stack = Stack::new();
@@ -2242,7 +2231,7 @@ mod tests {
         stack.push(StackEntry::PubKey(pk3));
         stack.push(StackEntry::Num(3));
         let b = op_checkmultisig(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -2332,7 +2321,7 @@ mod tests {
         stack.push(StackEntry::PubKey(pk3));
         stack.push(StackEntry::Num(3));
         let b = op_checkmultisigverify(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::Verify));
         /// same signature twice
         /// op_checkmultisigverify([msg,sig1,sig1,2,pk1,pk2,pk3,3]) -> fail
         let msg = hex::encode(vec![0, 0, 0]);
@@ -2352,7 +2341,7 @@ mod tests {
         let mut stack = Stack::new();
         stack.push(StackEntry::Num(MAX_PUB_KEYS_PER_MULTISIG as usize + ONE));
         let b = op_checkmultisigverify(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::NumPubkeys));
         /// not enough pubkeys
         /// op_checkmultisigverify([pk1,pk2,3]) -> fail
         let mut stack = Stack::new();
@@ -2360,7 +2349,7 @@ mod tests {
         stack.push(StackEntry::PubKey(pk2));
         stack.push(StackEntry::Num(3));
         let b = op_checkmultisigverify(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::NumPubkeys));
         /// too many signatures
         /// op_checkmultisigverify([4,pk1,pk2,pk3,3]) -> fail
         let mut stack = Stack::new();
@@ -2370,7 +2359,7 @@ mod tests {
         stack.push(StackEntry::PubKey(pk3));
         stack.push(StackEntry::Num(3));
         let b = op_checkmultisigverify(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::NumSignatures));
         /// not enough signatures
         /// op_checkmultisigverify([sig1,2,pk1,pk2,pk3,3]) -> fail
         let mut stack = Stack::new();
@@ -2381,7 +2370,7 @@ mod tests {
         stack.push(StackEntry::PubKey(pk3));
         stack.push(StackEntry::Num(3));
         let b = op_checkmultisigverify(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::NumSignatures));
         /// no message
         /// op_checkmultisigverify([sig1,sig2,2,pk1,pk2,pk3,3]) -> fail
         let mut stack = Stack::new();
@@ -2393,7 +2382,7 @@ mod tests {
         stack.push(StackEntry::PubKey(pk3));
         stack.push(StackEntry::Num(3));
         let b = op_checkmultisigverify(&mut stack);
-        assert!(!b);
+        assert_eq!(b, Err(ScriptError::StackEmpty));
     }
 
     #[test]
@@ -2401,23 +2390,23 @@ mod tests {
         // empty script
         let v = vec![];
         let script = Script::from(v);
-        assert!(script.is_valid());
+        assert_eq!(script.verify(), Ok(()));
         // script length <= 10000 bytes
         let v = vec![StackEntry::Bytes("a".repeat(500).as_bytes().to_vec()); 20];
         let script = Script::from(v);
-        assert!(script.is_valid());
+        assert_eq!(script.verify(), Ok(()));
         // script length > 10000 bytes
         let v = vec![StackEntry::Bytes("a".repeat(500).as_bytes().to_vec()); 21];
         let script = Script::from(v);
-        assert!(!script.is_valid());
+        assert_eq!(script.verify(), Err(ScriptError::MaxScriptSize(21 * 500)));
         // # opcodes <= 201
         let v = vec![StackEntry::Op(OpCodes::OP_1); MAX_OPS_PER_SCRIPT as usize];
         let script = Script::from(v);
-        assert!(script.is_valid());
+        assert_eq!(script.verify(), Ok(()));
         // # opcodes > 201
         let v = vec![StackEntry::Op(OpCodes::OP_1); (MAX_OPS_PER_SCRIPT + 1) as usize];
         let script = Script::from(v);
-        assert!(!script.is_valid());
+        assert_eq!(script.verify(), Err(ScriptError::MaxScriptOps((MAX_OPS_PER_SCRIPT + 1) as usize)));
     }
 
     #[test]
@@ -2425,15 +2414,15 @@ mod tests {
         // empty stack
         let v = vec![];
         let stack = Stack::from(v);
-        assert!(stack.is_valid());
+        assert_eq!(stack.check_preconditions(), Ok(()));
         // # items on interpreter stack <= 1000
         let v = vec![StackEntry::Num(1); MAX_STACK_SIZE as usize];
         let stack = Stack::from(v);
-        assert!(stack.is_valid());
+        assert_eq!(stack.check_preconditions(), Ok(()));
         // # items on interpreter stack > 1000
         let v = vec![StackEntry::Num(1); (MAX_STACK_SIZE + 1) as usize];
         let stack = Stack::from(v);
-        assert!(!stack.is_valid());
+        assert_eq!(stack.check_preconditions(), Err(ScriptError::StackFull));
     }
 
     #[test]
@@ -2441,15 +2430,15 @@ mod tests {
         // empty script
         let v = vec![];
         let script = Script::from(v);
-        assert!(!script.interpret());
+        assert_eq!(script.interpret_full(), Err(ScriptError::EndStackDepth(0)));
         // OP_0
         let v = vec![StackEntry::Op(OpCodes::OP_0)];
         let script = Script::from(v);
-        assert!(!script.interpret());
+        assert_eq!(script.interpret_full(), Err(ScriptError::LastEntryIsZero));
         // OP_1
         let v = vec![StackEntry::Op(OpCodes::OP_1)];
         let script = Script::from(v);
-        assert!(script.interpret());
+        assert_eq!(script.interpret_full(), Ok(()));
         // OP_1 OP_2 OP_ADD OP_3 OP_EQUAL
         let v = vec![
             StackEntry::Op(OpCodes::OP_1),
@@ -2459,31 +2448,31 @@ mod tests {
             StackEntry::Op(OpCodes::OP_EQUAL),
         ];
         let script = Script::from(v);
-        assert!(script.interpret());
+        assert_eq!(script.interpret_full(), Ok(()));
         // script length <= 10000 bytes
         let v = vec![StackEntry::Bytes("a".repeat(500).as_bytes().to_vec()); 20];
         let script = Script::from(v);
-        assert!(!script.interpret());
+        assert_eq!(script.interpret_full(), Err(ScriptError::EndStackDepth(20)));
         // script length > 10000 bytes
         let v = vec![StackEntry::Bytes("a".repeat(500).as_bytes().to_vec()); 21];
         let script = Script::from(v);
-        assert!(!script.interpret());
+        assert_eq!(script.interpret_full(), Err(ScriptError::MaxScriptSize(500 * 21)));
         // # opcodes <= 201
         let v = vec![StackEntry::Op(OpCodes::OP_1); MAX_OPS_PER_SCRIPT as usize];
         let script = Script::from(v);
-        assert!(!script.interpret());
+        assert_eq!(script.interpret_full(), Err(ScriptError::EndStackDepth(MAX_OPS_PER_SCRIPT as usize)));
         // # opcodes > 201
         let v = vec![StackEntry::Op(OpCodes::OP_1); (MAX_OPS_PER_SCRIPT + 1) as usize];
         let script = Script::from(v);
-        assert!(!script.interpret());
+        assert_eq!(script.interpret_full(), Err(ScriptError::MaxScriptOps((MAX_OPS_PER_SCRIPT + 1) as usize)));
         // # items on interpreter stack <= 1000
         let v = vec![StackEntry::Num(1); MAX_STACK_SIZE as usize];
         let script = Script::from(v);
-        assert!(!script.interpret());
+        assert_eq!(script.interpret_full(), Err(ScriptError::EndStackDepth(MAX_STACK_SIZE as usize)));
         // # items on interpreter stack > 1000
         let v = vec![StackEntry::Num(1); (MAX_STACK_SIZE + 1) as usize];
         let script = Script::from(v);
-        assert!(!script.interpret());
+        assert_eq!(script.interpret_full(), Err(ScriptError::StackFull));
     }
 
     #[test]
@@ -2500,7 +2489,7 @@ mod tests {
             StackEntry::Op(OpCodes::OP_ENDIF),
         ];
         let script = Script::from(v);
-        assert!(!script.interpret());
+        assert_eq!(script.interpret_full(), Err(ScriptError::DuplicateElse));
         // OP_1 OP_IF OP_2 OP_ELSE OP_3 OP_ENDIF
         let v = vec![
             StackEntry::Op(OpCodes::OP_1),
@@ -2511,7 +2500,7 @@ mod tests {
             StackEntry::Op(OpCodes::OP_ENDIF),
         ];
         let script = Script::from(v);
-        assert!(script.interpret());
+        assert_eq!(script.interpret_full(), Ok(()));
         // OP_1 OP_IF OP_0 OP_ELSE OP_3 OP_ENDIF
         let v = vec![
             StackEntry::Op(OpCodes::OP_1),
@@ -2522,7 +2511,7 @@ mod tests {
             StackEntry::Op(OpCodes::OP_ENDIF),
         ];
         let script = Script::from(v);
-        assert!(!script.interpret());
+        assert_eq!(script.interpret_full(), Err(ScriptError::LastEntryIsZero));
         // OP_0 OP_IF OP_2 OP_ELSE OP_3 OP_ENDIF
         let v = vec![
             StackEntry::Op(OpCodes::OP_0),
@@ -2533,7 +2522,7 @@ mod tests {
             StackEntry::Op(OpCodes::OP_ENDIF),
         ];
         let script = Script::from(v);
-        assert!(script.interpret());
+        assert_eq!(script.interpret_full(), Ok(()));
         // OP_0 OP_IF OP_2 OP_ELSE OP_0 OP_ENDIF
         let v = vec![
             StackEntry::Op(OpCodes::OP_0),
@@ -2544,7 +2533,7 @@ mod tests {
             StackEntry::Op(OpCodes::OP_ENDIF),
         ];
         let script = Script::from(v);
-        assert!(!script.interpret());
+        assert_eq!(script.interpret_full(), Err(ScriptError::LastEntryIsZero));
         // OP_0 OP_NOTIF OP_2 OP_ELSE OP_0 OP_ENDIF
         let v = vec![
             StackEntry::Op(OpCodes::OP_0),
@@ -2555,7 +2544,7 @@ mod tests {
             StackEntry::Op(OpCodes::OP_ENDIF),
         ];
         let script = Script::from(v);
-        assert!(script.interpret());
+        assert_eq!(script.interpret_full(), Ok(()));
         // OP_0 OP_IF OP_2 OP_ENDIF
         let v = vec![
             StackEntry::Op(OpCodes::OP_1),
@@ -2564,7 +2553,7 @@ mod tests {
             StackEntry::Op(OpCodes::OP_ENDIF),
         ];
         let script = Script::from(v);
-        assert!(!script.interpret());
+        assert_eq!(script.interpret_full(), Err(ScriptError::LastEntryIsZero));
         // OP_1 OP_IF OP_2 OP_IF OP_3 OP_ELSE OP_0 OP_ENDIF OP_ENDIF
         let v = vec![
             StackEntry::Op(OpCodes::OP_1),
@@ -2578,7 +2567,7 @@ mod tests {
             StackEntry::Op(OpCodes::OP_ENDIF),
         ];
         let script = Script::from(v);
-        assert!(script.interpret());
+        assert_eq!(script.interpret_full(), Ok(()));
         // OP_1 OP_IF OP_0 OP_IF OP_3 OP_ELSE OP_0 OP_ENDIF OP_ENDIF
         let v = vec![
             StackEntry::Op(OpCodes::OP_1),
@@ -2592,7 +2581,7 @@ mod tests {
             StackEntry::Op(OpCodes::OP_ENDIF),
         ];
         let script = Script::from(v);
-        assert!(!script.interpret());
+        assert_eq!(script.interpret_full(), Err(ScriptError::LastEntryIsZero));
         // OP_0 OP_IF OP_2 OP_IF OP_3 OP_ELSE OP_4 OP_ENDIF OP_ELSE OP_0 OP_ENDIF
         let v = vec![
             StackEntry::Op(OpCodes::OP_0),
@@ -2608,7 +2597,7 @@ mod tests {
             StackEntry::Op(OpCodes::OP_ENDIF),
         ];
         let script = Script::from(v);
-        assert!(!script.interpret());
+        assert_eq!(script.interpret_full(), Err(ScriptError::LastEntryIsZero));
         // OP_1 OP_IF OP_1
         let v = vec![
             StackEntry::Op(OpCodes::OP_1),
@@ -2616,7 +2605,7 @@ mod tests {
             StackEntry::Op(OpCodes::OP_1),
         ];
         let script = Script::from(v);
-        assert!(!script.interpret());
+        assert_eq!(script.interpret_full(), Err(ScriptError::NotEmptyCondition));
         // OP_1 OP_IF OP_1 OP_ELSE OP_3
         let v = vec![
             StackEntry::Op(OpCodes::OP_1),
@@ -2626,7 +2615,7 @@ mod tests {
             StackEntry::Op(OpCodes::OP_3),
         ];
         let script = Script::from(v);
-        assert!(!script.interpret());
+        assert_eq!(script.interpret_full(), Err(ScriptError::NotEmptyCondition));
         // OP_2 OP_ELSE OP_3 OP_ENDIF
         let v = vec![
             StackEntry::Op(OpCodes::OP_2),
@@ -2635,30 +2624,44 @@ mod tests {
             StackEntry::Op(OpCodes::OP_ENDIF),
         ];
         let script = Script::from(v);
-        assert!(!script.interpret());
+        assert_eq!(script.interpret_full(), Err(ScriptError::EmptyCondition));
+        // OP_0 OP_IF
+        let v = vec![
+            StackEntry::Op(OpCodes::OP_0),
+            StackEntry::Op(OpCodes::OP_IF),
+        ];
+        let script = Script::from(v);
+        assert_eq!(script.interpret_full(), Err(ScriptError::NotEmptyCondition));
         // OP_IF
         let v = vec![StackEntry::Op(OpCodes::OP_IF)];
         let script = Script::from(v);
-        assert!(!script.interpret());
+        assert_eq!(script.interpret_full(), Err(ScriptError::StackEmpty));
+        // OP_0 OP_NOTIF
+        let v = vec![
+            StackEntry::Op(OpCodes::OP_0),
+            StackEntry::Op(OpCodes::OP_NOTIF),
+        ];
+        let script = Script::from(v);
+        assert_eq!(script.interpret_full(), Err(ScriptError::NotEmptyCondition));
         // OP_NOTIF
         let v = vec![StackEntry::Op(OpCodes::OP_NOTIF)];
         let script = Script::from(v);
-        assert!(!script.interpret());
+        assert_eq!(script.interpret_full(), Err(ScriptError::StackEmpty));
         // OP_ELSE
         let v = vec![StackEntry::Op(OpCodes::OP_ELSE)];
         let script = Script::from(v);
-        assert!(!script.interpret());
+        assert_eq!(script.interpret_full(), Err(ScriptError::EmptyCondition));
         // OP_ENDIF
         let v = vec![StackEntry::Op(OpCodes::OP_ENDIF)];
         let script = Script::from(v);
-        assert!(!script.interpret());
+        assert_eq!(script.interpret_full(), Err(ScriptError::EmptyCondition));
     }
 
     #[test]
     fn test_burn_script() {
         let v = vec![StackEntry::Op(OpCodes::OP_BURN)];
         let script = Script::from(v);
-        assert!(!script.interpret());
+        assert_eq!(script.interpret_full(), Err(ScriptError::Burn));
     }
 
     /// Util function to create p2pkh TxIns
@@ -2668,8 +2671,6 @@ mod tests {
         for entry in tx_values {
             let mut new_tx_in = TxIn::new();
             new_tx_in.script_signature = Script::multisig_validation(
-                m,
-                entry.pub_keys.len(),
                 entry.previous_out.t_hash.as_ref().to_vec(),
                 entry.signatures,
                 entry.pub_keys,
@@ -2753,7 +2754,7 @@ mod tests {
 
         let tx_ins = create_multisig_member_tx_ins(vec![tx_const]);
 
-        assert!(&tx_ins[0].clone().script_signature.interpret());
+        assert_eq!(tx_ins[0].clone().script_signature.interpret_full(), Ok(()));
     }
 
     #[test]
@@ -2772,7 +2773,7 @@ mod tests {
 
         let tx_ins = create_multisig_member_tx_ins(vec![tx_const]);
 
-        assert!(!&tx_ins[0].clone().script_signature.interpret());
+        assert_eq!(tx_ins[0].clone().script_signature.interpret_full(), Err(ScriptError::LastEntryIsZero));
     }
 
     #[test]
@@ -2921,7 +2922,7 @@ mod tests {
 
         let tx_ins = create_multisig_tx_ins(vec![tx_const], m);
 
-        assert!(&tx_ins[0].script_signature.interpret());
+        assert_eq!(tx_ins[0].clone().script_signature.interpret_full(), Ok(()));
     }
 
     #[test]
@@ -3189,7 +3190,7 @@ mod tests {
 
         let tx_ins = create_multisig_member_tx_ins(vec![tx_const]);
 
-        assert!(!&tx_ins[0].clone().script_signature.interpret());
+        assert_eq!(tx_ins[0].clone().script_signature.interpret_full(), Err(ScriptError::LastEntryIsZero));
     }
 
     #[test]
@@ -3207,6 +3208,6 @@ mod tests {
 
         let tx_ins = create_multisig_member_tx_ins(vec![tx_const]);
 
-        assert!(&tx_ins[0].clone().script_signature.interpret());
+        assert_eq!(tx_ins[0].clone().script_signature.interpret_full(), Ok(()));
     }
 }

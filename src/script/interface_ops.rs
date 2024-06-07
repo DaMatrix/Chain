@@ -6,8 +6,7 @@ use crate::crypto::sign_ed25519::{PublicKey, Signature};
 use crate::primitives::asset::{Asset, TokenAmount};
 use crate::primitives::transaction::*;
 use crate::script::lang::{ConditionStack, Script, Stack};
-use crate::script::{OpCodes, StackEntry};
-use crate::utils::error_utils::*;
+use crate::script::{OpCodes, ScriptError, StackEntry};
 use crate::utils::transaction_utils::construct_address;
 use std::collections::BTreeMap;
 use tracing::{debug, error, info, trace};
@@ -22,10 +21,8 @@ use tracing_subscriber::field::debug;
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_nop(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPNOP, OPNOP_DESC);
-    trace(op, desc);
-    true
+pub fn op_nop(stack: &mut Stack) -> Result<(), ScriptError> {
+    Ok(())
 }
 
 /// OP_IF: Checks if the top item on the stack is not ZERO and executes the next block of instructions
@@ -34,27 +31,15 @@ pub fn op_nop(stack: &mut Stack) -> bool {
 ///
 /// * `stack`  - mutable reference to the stack
 /// * `cond_stack`  - mutable reference to the condition stack
-pub fn op_if(stack: &mut Stack, cond_stack: &mut ConditionStack) -> bool {
-    let (op, desc) = (OPIF, OPIF_DESC);
-    trace(op, desc);
-    let cond = if cond_stack.all_true() {
-        let n = match stack.pop() {
-            Some(StackEntry::Num(n)) => n,
-            Some(_) => {
-                error_item_type(op);
-                return false;
-            }
-            _ => {
-                error_num_items(op);
-                return false;
-            }
-        };
+pub fn op_if(stack: &mut Stack) -> Result<(), ScriptError> {
+    let cond = if stack.cond_stack.all_true() {
+        let n = pop_num(stack)?;
         n != ZERO
     } else {
         false
     };
-    cond_stack.push(cond);
-    true
+    stack.cond_stack.push(cond);
+    Ok(())
 }
 
 /// OP_NOTIF: Checks if the top item on the stack is ZERO and executes the next block of instructions
@@ -63,27 +48,15 @@ pub fn op_if(stack: &mut Stack, cond_stack: &mut ConditionStack) -> bool {
 ///
 /// * `stack`  - mutable reference to the stack
 /// * `cond_stack`  - mutable reference to the condition stack
-pub fn op_notif(stack: &mut Stack, cond_stack: &mut ConditionStack) -> bool {
-    let (op, desc) = (OPNOTIF, OPNOTIF_DESC);
-    trace(op, desc);
-    let cond = if cond_stack.all_true() {
-        let n = match stack.pop() {
-            Some(StackEntry::Num(n)) => n,
-            Some(_) => {
-                error_item_type(op);
-                return false;
-            }
-            _ => {
-                error_num_items(op);
-                return false;
-            }
-        };
+pub fn op_notif(stack: &mut Stack) -> Result<(), ScriptError> {
+    let cond = if stack.cond_stack.all_true() {
+        let n = pop_num(stack)?;
         n == ZERO
     } else {
         false
     };
-    cond_stack.push(cond);
-    true
+    stack.cond_stack.push(cond);
+    Ok(())
 }
 
 /// OP_ELSE: Executes the next block of instructions if the previous OP_IF or OP_NOTIF was not executed
@@ -91,15 +64,8 @@ pub fn op_notif(stack: &mut Stack, cond_stack: &mut ConditionStack) -> bool {
 /// ### Arguments
 ///
 /// * `cond_stack`  - mutable reference to the condition stack
-pub fn op_else(cond_stack: &mut ConditionStack) -> bool {
-    let (op, desc) = (OPELSE, OPELSE_DESC);
-    trace(op, desc);
-    if cond_stack.is_empty() {
-        error_empty_condition(op);
-        return false;
-    }
-    cond_stack.toggle();
-    true
+pub fn op_else(stack: &mut Stack) -> Result<(), ScriptError> {
+    stack.cond_stack.toggle()
 }
 
 /// OP_ENDIF: Ends an OP_IF or OP_NOTIF block
@@ -107,15 +73,8 @@ pub fn op_else(cond_stack: &mut ConditionStack) -> bool {
 /// ### Arguments
 ///
 /// * `cond_stack`  - mutable reference to the condition stack
-pub fn op_endif(cond_stack: &mut ConditionStack) -> bool {
-    let (op, desc) = (OPENDIF, OPENDIF_DESC);
-    trace(op, desc);
-    if cond_stack.is_empty() {
-        error_empty_condition(op);
-        return false;
-    }
-    cond_stack.pop();
-    true
+pub fn op_endif(stack: &mut Stack) -> Result<(), ScriptError> {
+    stack.cond_stack.pop()
 }
 
 /// OP_VERIFY: Removes the top item from the stack and ends execution with an error if it is ZERO
@@ -126,22 +85,12 @@ pub fn op_endif(cond_stack: &mut ConditionStack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_verify(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPVERIFY, OPVERIFY_DESC);
-    trace(op, desc);
-    match stack.pop() {
-        Some(x) => {
-            if x == StackEntry::Num(ZERO) {
-                error_verify(op);
-                return false;
-            }
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    true
+pub fn op_verify(stack: &mut Stack) -> Result<(), ScriptError> {
+    let x = pop_num(stack)?;
+    if x == ZERO {
+        return Err(ScriptError::Verify);
+    }
+    Ok(())
 }
 
 /// OP_BURN: Ends execution with an error
@@ -151,11 +100,8 @@ pub fn op_verify(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_burn(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPBURN, OPBURN_DESC);
-    trace(op, desc);
-    error_burn(op);
-    false
+pub fn op_burn(stack: &mut Stack) -> Result<(), ScriptError> {
+    Err(ScriptError::Burn)
 }
 
 /*---- STACK OPS ----*/
@@ -168,17 +114,9 @@ pub fn op_burn(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_toaltstack(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPTOALTSTACK, OPTOALTSTACK_DESC);
-    trace(op, desc);
-    match stack.pop() {
-        Some(x) => stack.alt_stack.push(x),
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    true
+pub fn op_toaltstack(stack: &mut Stack) -> Result<(), ScriptError> {
+    let x = stack.pop()?;
+    stack.push_alt(x)
 }
 
 /// OP_FROMALTSTACK: Moves the top item from the alt stack to the top of the main stack
@@ -188,17 +126,9 @@ pub fn op_toaltstack(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_fromaltstack(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPFROMALTSTACK, OPFROMALTSTACK_DESC);
-    trace(op, desc);
-    match stack.alt_stack.pop() {
-        Some(x) => stack.push(x),
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    true
+pub fn op_fromaltstack(stack: &mut Stack) -> Result<(), ScriptError> {
+    let x = stack.pop_alt()?;
+    stack.push(x)
 }
 
 /// OP_2DROP: Removes the top two items from the stack
@@ -208,16 +138,10 @@ pub fn op_fromaltstack(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_2drop(stack: &mut Stack) -> bool {
-    let (op, desc) = (OP2DROP, OP2DROP_DESC);
-    trace(op, desc);
-    let len = stack.main_stack.len();
-    if len < TWO {
-        error_num_items(op);
-        return false;
-    }
-    stack.main_stack.drain(len - TWO..);
-    true
+pub fn op_2drop(stack: &mut Stack) -> Result<(), ScriptError> {
+    stack.pop()?;
+    stack.pop()?;
+    Ok(())
 }
 
 /// OP_2DUP: Duplicates the top two items on the stack
@@ -227,17 +151,13 @@ pub fn op_2drop(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_2dup(stack: &mut Stack) -> bool {
-    let (op, desc) = (OP2DUP, OP2DUP_DESC);
-    trace(op, desc);
-    let len = stack.main_stack.len();
+pub fn op_2dup(stack: &mut Stack) -> Result<(), ScriptError> {
+    let len = stack.depth();
     if len < TWO {
-        error_num_items(op);
-        return false;
+        return Err(ScriptError::StackEmpty);
     }
-    let last_two = stack.main_stack[len - TWO..].to_vec();
-    stack.main_stack.extend_from_slice(&last_two);
-    true
+    stack.main_stack.extend_from_within(len - TWO..);
+    Ok(())
 }
 
 /// OP_3DUP: Duplicates the top three items on the stack
@@ -247,17 +167,13 @@ pub fn op_2dup(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_3dup(stack: &mut Stack) -> bool {
-    let (op, desc) = (OP3DUP, OP3DUP_DESC);
-    trace(op, desc);
-    let len = stack.main_stack.len();
+pub fn op_3dup(stack: &mut Stack) -> Result<(), ScriptError> {
+    let len = stack.depth();
     if len < THREE {
-        error_num_items(op);
-        return false;
+        return Err(ScriptError::StackEmpty);
     }
-    let last_three = stack.main_stack[len - THREE..].to_vec();
-    stack.main_stack.extend_from_slice(&last_three);
-    true
+    stack.main_stack.extend_from_within(len - THREE..);
+    Ok(())
 }
 
 /// OP_2OVER: Copies the second-to-top pair of items to the top of the stack
@@ -267,17 +183,13 @@ pub fn op_3dup(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_2over(stack: &mut Stack) -> bool {
-    let (op, desc) = (OP2OVER, OP2OVER_DESC);
-    trace(op, desc);
-    let len = stack.main_stack.len();
+pub fn op_2over(stack: &mut Stack) -> Result<(), ScriptError> {
+    let len = stack.depth();
     if len < FOUR {
-        error_num_items(op);
-        return false;
+        return Err(ScriptError::StackEmpty);
     }
-    let items = stack.main_stack[len - FOUR..len - TWO].to_vec();
-    stack.main_stack.extend_from_slice(&items);
-    true
+    stack.main_stack.extend_from_within(len - FOUR..len - TWO);
+    Ok(())
 }
 
 /// OP_2ROT: Moves the third-to-top pair of items to the top of the stack
@@ -287,18 +199,15 @@ pub fn op_2over(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_2rot(stack: &mut Stack) -> bool {
-    let (op, desc) = (OP2ROT, OP2ROT_DESC);
-    trace(op, desc);
-    let len = stack.main_stack.len();
+pub fn op_2rot(stack: &mut Stack) -> Result<(), ScriptError> {
+    let len = stack.depth();
     if len < SIX {
-        error_num_items(op);
-        return false;
+        return Err(ScriptError::StackEmpty);
     }
     let items = stack.main_stack[len - SIX..len - FOUR].to_vec();
     stack.main_stack.drain(len - SIX..len - FOUR);
     stack.main_stack.extend_from_slice(&items);
-    true
+    Ok(())
 }
 
 /// OP_2SWAP: Swaps the top two pairs of items on the stack
@@ -308,17 +217,14 @@ pub fn op_2rot(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_2swap(stack: &mut Stack) -> bool {
-    let (op, desc) = (OP2SWAP, OP2SWAP_DESC);
-    trace(op, desc);
-    let len = stack.main_stack.len();
+pub fn op_2swap(stack: &mut Stack) -> Result<(), ScriptError> {
+    let len = stack.depth();
     if len < FOUR {
-        error_num_items(op);
-        return false;
+        return Err(ScriptError::StackEmpty);
     }
     stack.main_stack.swap(len - FOUR, len - TWO);
     stack.main_stack.swap(len - THREE, len - ONE);
-    true
+    Ok(())
 }
 
 /// OP_IFDUP: Duplicates the top item on the stack if it is not ZERO
@@ -329,21 +235,13 @@ pub fn op_2swap(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_ifdup(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPIFDUP, OPIFDUP_DESC);
-    trace(op, desc);
-    match stack.last() {
-        Some(x) => {
-            if x != StackEntry::Num(ZERO) {
-                stack.push(x);
-            }
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    true
+pub fn op_ifdup(stack: &mut Stack) -> Result<(), ScriptError> {
+    let x = stack.peek()?;
+    if *x != StackEntry::Num(ZERO) {
+        stack.push(x.clone())
+    } else {
+        Ok(())
+    }
 }
 
 /// OP_DEPTH: Pushes the stack size onto the stack
@@ -353,10 +251,8 @@ pub fn op_ifdup(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_depth(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPDEPTH, OPDEPTH_DESC);
-    trace(op, desc);
-    stack.push(StackEntry::Num(stack.main_stack.len()))
+pub fn op_depth(stack: &mut Stack) -> Result<(), ScriptError> {
+    stack.push(StackEntry::Num(stack.depth()))
 }
 
 /// OP_DROP: Removes the top item from the stack
@@ -366,17 +262,9 @@ pub fn op_depth(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_drop(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPDROP, OPDROP_DESC);
-    trace(op, desc);
-    match stack.pop() {
-        Some(x) => (),
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    true
+pub fn op_drop(stack: &mut Stack) -> Result<(), ScriptError> {
+    stack.pop()?;
+    Ok(())
 }
 
 /// OP_DUP: Duplicates the top item on the stack
@@ -386,17 +274,8 @@ pub fn op_drop(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_dup(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPDUP, OPDUP_DESC);
-    trace(op, desc);
-    match stack.last() {
-        Some(x) => stack.push(x),
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    true
+pub fn op_dup(stack: &mut Stack) -> Result<(), ScriptError> {
+    stack.push(stack.last()?)
 }
 
 /// OP_NIP: Removes the second-to-top item from the stack
@@ -406,16 +285,13 @@ pub fn op_dup(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_nip(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPNIP, OPNIP_DESC);
-    trace(op, desc);
-    let len = stack.main_stack.len();
+pub fn op_nip(stack: &mut Stack) -> Result<(), ScriptError> {
+    let len = stack.depth();
     if len < TWO {
-        error_num_items(op);
-        return false;
+        return Err(ScriptError::StackEmpty);
     }
     stack.main_stack.remove(len - TWO);
-    true
+    Ok(())
 }
 
 /// OP_OVER: Copies the second-to-top item to the top of the stack
@@ -425,13 +301,10 @@ pub fn op_nip(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_over(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPOVER, OPOVER_DESC);
-    trace(op, desc);
-    let len = stack.main_stack.len();
+pub fn op_over(stack: &mut Stack) -> Result<(), ScriptError> {
+    let len = stack.depth();
     if len < TWO {
-        error_num_items(op);
-        return false;
+        return Err(ScriptError::StackEmpty);
     }
     let x1 = stack.main_stack[len - TWO].clone();
     stack.push(x1)
@@ -444,24 +317,11 @@ pub fn op_over(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_pick(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPPICK, OPPICK_DESC);
-    trace(op, desc);
-    let n = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let len = stack.main_stack.len();
+pub fn op_pick(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n = pop_num(stack)?;
+    let len = stack.depth();
     if n >= len {
-        error_item_index(op);
-        return false;
+        return Err(ScriptError::StackIndexBounds(n, len));
     }
     let x = stack.main_stack[len - ONE - n].clone();
     stack.push(x)
@@ -474,27 +334,13 @@ pub fn op_pick(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_roll(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPROLL, OPROLL_DESC);
-    trace(op, desc);
-    let n = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let len = stack.main_stack.len();
+pub fn op_roll(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n = pop_num(stack)?;
+    let len = stack.depth();
     if n >= len {
-        error_item_index(op);
-        return false;
+        return Err(ScriptError::StackIndexBounds(n, len));
     }
-    let x = stack.main_stack[len - ONE - n].clone();
-    stack.main_stack.remove(len - ONE - n);
+    let x = stack.main_stack.remove(len - ONE - n);
     stack.push(x)
 }
 
@@ -505,17 +351,14 @@ pub fn op_roll(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_rot(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPROT, OPROT_DESC);
-    trace(op, desc);
-    let len = stack.main_stack.len();
+pub fn op_rot(stack: &mut Stack) -> Result<(), ScriptError> {
+    let len = stack.depth();
     if len < THREE {
-        error_num_items(op);
-        return false;
+        return Err(ScriptError::StackEmpty);
     }
     stack.main_stack.swap(len - THREE, len - TWO);
     stack.main_stack.swap(len - TWO, len - ONE);
-    true
+    Ok(())
 }
 
 /// OP_SWAP: Swaps the top two items on the stack
@@ -525,16 +368,13 @@ pub fn op_rot(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_swap(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPSWAP, OPSWAP_DESC);
-    trace(op, desc);
-    let len = stack.main_stack.len();
+pub fn op_swap(stack: &mut Stack) -> Result<(), ScriptError> {
+    let len = stack.depth();
     if len < TWO {
-        error_num_items(op);
-        return false;
+        return Err(ScriptError::StackEmpty);
     }
     stack.main_stack.swap(len - TWO, len - ONE);
-    true
+    Ok(())
 }
 
 /// OP_TUCK: Copies the top item behind the second-to-top item on the stack
@@ -544,17 +384,14 @@ pub fn op_swap(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_tuck(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPTUCK, OPTUCK_DESC);
-    trace(op, desc);
-    let len = stack.main_stack.len();
+pub fn op_tuck(stack: &mut Stack) -> Result<(), ScriptError> {
+    let len = stack.depth();
     if len < TWO {
-        error_num_items(op);
-        return false;
+        return Err(ScriptError::StackEmpty);
     }
     let x2 = stack.main_stack[len - ONE].clone();
-    stack.main_stack.insert(len - TWO, x2);
-    true
+    stack.main_stack.insert(len - TWO, x2); // TODO: this doesn't enforce the stack validity rules
+    Ok(())
 }
 
 /*---- SPLICE OPS ----*/
@@ -566,35 +403,9 @@ pub fn op_tuck(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_cat(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPCAT, OPCAT_DESC);
-    trace(op, desc);
-    let s2 = match stack.pop() {
-        Some(StackEntry::Bytes(s)) => s,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let s1 = match stack.pop() {
-        Some(StackEntry::Bytes(s)) => s,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    if s1.len() + s2.len() > MAX_SCRIPT_ITEM_SIZE as usize {
-        error_item_size(op);
-        return false;
-    }
+pub fn op_cat(stack: &mut Stack) -> Result<(), ScriptError> {
+    let s2 = pop_bytes(stack)?;
+    let s1 = pop_bytes(stack)?;
     let cat = [s1, s2].concat();
     stack.push(StackEntry::Bytes(cat))
 }
@@ -606,57 +417,16 @@ pub fn op_cat(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_substr(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPSUBSTR, OPSUBSTR_DESC);
-    trace(op, desc);
-    let n2 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let n1 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let s = match stack.pop() {
-        Some(StackEntry::Bytes(s)) => s,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_substr(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n2 = pop_num(stack)?;
+    let n1 = pop_num(stack)?;
+    let s = pop_bytes(stack)?;
     // TODO: As this was previously a hex string, the indices don't exactly correspond to what
     //       they did originally. However, I don't think there are any existing transactions
     //       on the chain which actually use this opcode, so I'm fairly confident it won't
     //       matter. Double-check that this is the case before merging!
-    if n1 >= s.len() {
-        error_item_index(op);
-        return false;
-    }
-    if n2 > s.len() {
-        error_item_index(op);
-        return false;
-    }
-    if n1 + n2 > s.len() {
-        error_item_index(op);
-        return false;
+    if n1 >= s.len() || n2 > s.len() || n1 + n2 > s.len() {
+        return Err(ScriptError::SliceBounds(n1, n2, s.len()))
     }
     let substr = s[n1..n1 + n2].to_vec();
     stack.push(StackEntry::Bytes(substr))
@@ -670,31 +440,9 @@ pub fn op_substr(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_left(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPLEFT, OPLEFT_DESC);
-    trace(op, desc);
-    let n = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let s = match stack.pop() {
-        Some(StackEntry::Bytes(s)) => s,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_left(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n = pop_num(stack)?;
+    let s = pop_bytes(stack)?;
     if n >= s.len() {
         stack.push(StackEntry::Bytes(s))
     } else {
@@ -715,31 +463,9 @@ pub fn op_left(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_right(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPRIGHT, OPRIGHT_DESC);
-    trace(op, desc);
-    let n = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let s = match stack.pop() {
-        Some(StackEntry::Bytes(s)) => s,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_right(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n = pop_num(stack)?;
+    let s = pop_bytes(stack)?;
     if n >= s.len() {
         stack.push(StackEntry::Bytes(Vec::new()))
     } else {
@@ -759,20 +485,8 @@ pub fn op_right(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_size(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPSIZE, OPSIZE_DESC);
-    trace(op, desc);
-    let len = match stack.last() {
-        Some(StackEntry::Bytes(s)) => s.len(),
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_size(stack: &mut Stack) -> Result<(), ScriptError> {
+    let len = peek_bytes(&stack)?.len();
     // TODO: As this was previously a hex string, the length doesn't exactly correspond to what
     //       it did originally. However, I don't think there are any existing transactions
     //       on the chain which actually use this opcode, so I'm fairly confident it won't
@@ -789,20 +503,8 @@ pub fn op_size(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_invert(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPINVERT, OPINVERT_DESC);
-    trace(op, desc);
-    let n = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_invert(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n = pop_num(stack)?;
     stack.push(StackEntry::Num(!n))
 }
 
@@ -813,31 +515,9 @@ pub fn op_invert(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_and(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPAND, OPAND_DESC);
-    trace(op, desc);
-    let n2 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let n1 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_and(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n2 = pop_num(stack)?;
+    let n1 = pop_num(stack)?;
     stack.push(StackEntry::Num(n1 & n2))
 }
 
@@ -848,31 +528,9 @@ pub fn op_and(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_or(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPOR, OPOR_DESC);
-    trace(op, desc);
-    let n2 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let n1 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_or(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n2 = pop_num(stack)?;
+    let n1 = pop_num(stack)?;
     stack.push(StackEntry::Num(n1 | n2))
 }
 
@@ -883,31 +541,9 @@ pub fn op_or(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_xor(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPXOR, OPXOR_DESC);
-    trace(op, desc);
-    let n2 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let n1 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_xor(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n2 = pop_num(stack)?;
+    let n1 = pop_num(stack)?;
     stack.push(StackEntry::Num(n1 ^ n2))
 }
 
@@ -919,23 +555,9 @@ pub fn op_xor(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_equal(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPEQUAL, OPEQUAL_DESC);
-    trace(op, desc);
-    let x2 = match stack.pop() {
-        Some(x) => x,
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let x1 = match stack.pop() {
-        Some(x) => x,
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_equal(stack: &mut Stack) -> Result<(), ScriptError> {
+    let x2 = stack.pop()?;
+    let x1 = stack.pop()?;
     if x1 == x2 {
         stack.push(StackEntry::Num(ONE))
     } else {
@@ -951,28 +573,13 @@ pub fn op_equal(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_equalverify(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPEQUALVERIFY, OPEQUALVERIFY_DESC);
-    trace(op, desc);
-    let x2 = match stack.pop() {
-        Some(x) => x,
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let x1 = match stack.pop() {
-        Some(x) => x,
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_equalverify(stack: &mut Stack) -> Result<(), ScriptError> {
+    let x2 = stack.pop()?;
+    let x1 = stack.pop()?;
     if x1 != x2 {
-        error_not_equal_items(op);
-        return false;
+        return Err(ScriptError::ItemsNotEqual);
     }
-    true
+    Ok(())
 }
 
 /*---- ARITHMETIC OPS ----*/
@@ -984,26 +591,11 @@ pub fn op_equalverify(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_1add(stack: &mut Stack) -> bool {
-    let (op, desc) = (OP1ADD, OP1ADD_DESC);
-    trace(op, desc);
-    let n = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_1add(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n = pop_num(stack)?;
     match n.checked_add(ONE) {
         Some(n) => stack.push(StackEntry::Num(n)),
-        _ => {
-            error_overflow(op);
-            false
-        }
+        _ => Err(ScriptError::Overflow),
     }
 }
 
@@ -1014,26 +606,11 @@ pub fn op_1add(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_1sub(stack: &mut Stack) -> bool {
-    let (op, desc) = (OP1SUB, OP1SUB_DESC);
-    trace(op, desc);
-    let n = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_1sub(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n = pop_num(stack)?;
     match n.checked_sub(ONE) {
         Some(n) => stack.push(StackEntry::Num(n)),
-        _ => {
-            error_overflow(op);
-            false
-        }
+        _ => Err(ScriptError::Overflow),
     }
 }
 
@@ -1044,26 +621,11 @@ pub fn op_1sub(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_2mul(stack: &mut Stack) -> bool {
-    let (op, desc) = (OP2MUL, OP2MUL_DESC);
-    trace(op, desc);
-    let n = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_2mul(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n = pop_num(stack)?;
     match n.checked_mul(TWO) {
         Some(n) => stack.push(StackEntry::Num(n)),
-        _ => {
-            error_overflow(op);
-            false
-        }
+        _ => Err(ScriptError::Overflow),
     }
 }
 
@@ -1074,20 +636,8 @@ pub fn op_2mul(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_2div(stack: &mut Stack) -> bool {
-    let (op, desc) = (OP2DIV, OP2DIV_DESC);
-    trace(op, desc);
-    let n = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_2div(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n = pop_num(stack)?;
     stack.push(StackEntry::Num(n / TWO))
 }
 
@@ -1099,20 +649,8 @@ pub fn op_2div(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_not(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPNOT, OPNOT_DESC);
-    trace(op, desc);
-    let n = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_not(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n = pop_num(stack)?;
     if n == ZERO {
         stack.push(StackEntry::Num(ONE))
     } else {
@@ -1128,20 +666,8 @@ pub fn op_not(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_0notequal(stack: &mut Stack) -> bool {
-    let (op, desc) = (OP0NOTEQUAL, OP0NOTEQUAL_DESC);
-    trace(op, desc);
-    let n = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_0notequal(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n = pop_num(stack)?;
     if n != ZERO {
         stack.push(StackEntry::Num(ONE))
     } else {
@@ -1156,37 +682,12 @@ pub fn op_0notequal(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_add(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPADD, OPADD_DESC);
-    trace(op, desc);
-    let n2 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let n1 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_add(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n2 = pop_num(stack)?;
+    let n1 = pop_num(stack)?;
     match n1.checked_add(n2) {
         Some(n) => stack.push(StackEntry::Num(n)),
-        _ => {
-            error_overflow(op);
-            false
-        }
+        _ => Err(ScriptError::Overflow),
     }
 }
 
@@ -1197,37 +698,12 @@ pub fn op_add(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_sub(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPSUB, OPSUB_DESC);
-    trace(op, desc);
-    let n2 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let n1 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_sub(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n2 = pop_num(stack)?;
+    let n1 = pop_num(stack)?;
     match n1.checked_sub(n2) {
         Some(n) => stack.push(StackEntry::Num(n)),
-        _ => {
-            error_overflow(op);
-            false
-        }
+        _ => Err(ScriptError::Overflow),
     }
 }
 
@@ -1238,37 +714,12 @@ pub fn op_sub(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_mul(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPMUL, OPMUL_DESC);
-    trace(op, desc);
-    let n2 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let n1 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_mul(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n2 = pop_num(stack)?;
+    let n1 = pop_num(stack)?;
     match n1.checked_mul(n2) {
         Some(n) => stack.push(StackEntry::Num(n)),
-        _ => {
-            error_overflow(op);
-            false
-        }
+        _ => Err(ScriptError::Overflow),
     }
 }
 
@@ -1279,37 +730,12 @@ pub fn op_mul(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_div(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPDIV, OPDIV_DESC);
-    trace(op, desc);
-    let n2 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let n1 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_div(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n2 = pop_num(stack)?;
+    let n1 = pop_num(stack)?;
     match n1.checked_div(n2) {
         Some(n) => stack.push(StackEntry::Num(n)),
-        _ => {
-            error_div_zero(op);
-            false
-        }
+        _ => Err(ScriptError::DivideByZero),
     }
 }
 
@@ -1320,37 +746,12 @@ pub fn op_div(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_mod(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPMOD, OPMOD_DESC);
-    trace(op, desc);
-    let n2 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let n1 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_mod(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n2 = pop_num(stack)?;
+    let n1 = pop_num(stack)?;
     match n1.checked_rem(n2) {
         Some(n) => stack.push(StackEntry::Num(n)),
-        _ => {
-            error_div_zero(op);
-            false
-        }
+        _ => Err(ScriptError::DivideByZero),
     }
 }
 
@@ -1361,37 +762,12 @@ pub fn op_mod(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_lshift(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPLSHIFT, OPLSHIFT_DESC);
-    trace(op, desc);
-    let n2 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let n1 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_lshift(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n2 = pop_num(stack)?;
+    let n1 = pop_num(stack)?;
     match n1.checked_shl(n2 as u32) {
         Some(n) => stack.push(StackEntry::Num(n)),
-        _ => {
-            error_div_zero(op);
-            false
-        }
+        _ => Err(ScriptError::DivideByZero),
     }
 }
 
@@ -1402,37 +778,12 @@ pub fn op_lshift(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_rshift(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPRIGHT, OPRIGHT_DESC);
-    trace(op, desc);
-    let n2 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let n1 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_rshift(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n2 = pop_num(stack)?;
+    let n1 = pop_num(stack)?;
     match n1.checked_shr(n2 as u32) {
         Some(n) => stack.push(StackEntry::Num(n)),
-        _ => {
-            error_div_zero(op);
-            false
-        }
+        _ => Err(ScriptError::DivideByZero),
     }
 }
 
@@ -1444,31 +795,9 @@ pub fn op_rshift(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_booland(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPBOOLAND, OPBOOLAND_DESC);
-    trace(op, desc);
-    let n2 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let n1 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_booland(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n2 = pop_num(stack)?;
+    let n1 = pop_num(stack)?;
     if n1 != ZERO && n2 != ZERO {
         stack.push(StackEntry::Num(ONE))
     } else {
@@ -1484,31 +813,9 @@ pub fn op_booland(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_boolor(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPBOOLOR, OPBOOLOR_DESC);
-    trace(op, desc);
-    let n2 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let n1 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_boolor(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n2 = pop_num(stack)?;
+    let n1 = pop_num(stack)?;
     if n1 != ZERO || n2 != ZERO {
         stack.push(StackEntry::Num(ONE))
     } else {
@@ -1524,31 +831,9 @@ pub fn op_boolor(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_numequal(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPNUMEQUAL, OPNUMEQUAL_DESC);
-    trace(op, desc);
-    let n2 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let n1 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_numequal(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n2 = pop_num(stack)?;
+    let n1 = pop_num(stack)?;
     if n1 == n2 {
         stack.push(StackEntry::Num(ONE))
     } else {
@@ -1564,36 +849,13 @@ pub fn op_numequal(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_numequalverify(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPNUMEQUALVERIFY, OPNUMEQUALVERIFY_DESC);
-    trace(op, desc);
-    let n2 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let n1 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_numequalverify(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n2 = pop_num(stack)?;
+    let n1 = pop_num(stack)?;
     if n1 != n2 {
-        error_not_equal_items(op);
-        return false;
+        return Err(ScriptError::ItemsNotEqual);
     }
-    true
+    Ok(())
 }
 
 /// OP_NUMNOTEQUAL: Substitutes the two numbers on top of the stack with ONE if they are not equal, with ZERO otherwise
@@ -1604,31 +866,9 @@ pub fn op_numequalverify(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_numnotequal(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPNUMNOTEQUAL, OPNUMNOTEQUAL_DESC);
-    trace(op, desc);
-    let n2 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let n1 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_numnotequal(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n2 = pop_num(stack)?;
+    let n1 = pop_num(stack)?;
     if n1 != n2 {
         stack.push(StackEntry::Num(ONE))
     } else {
@@ -1644,31 +884,9 @@ pub fn op_numnotequal(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_lessthan(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPLESSTHAN, OPLESSTHAN_DESC);
-    trace(op, desc);
-    let n2 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let n1 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_lessthan(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n2 = pop_num(stack)?;
+    let n1 = pop_num(stack)?;
     if n1 < n2 {
         stack.push(StackEntry::Num(ONE))
     } else {
@@ -1684,31 +902,9 @@ pub fn op_lessthan(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_greaterthan(stack: &mut Stack) -> bool {
-    let (op, desc) = (OP0NOTEQUAL, OP0NOTEQUAL_DESC);
-    trace(op, desc);
-    let n2 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let n1 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_greaterthan(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n2 = pop_num(stack)?;
+    let n1 = pop_num(stack)?;
     if n1 > n2 {
         stack.push(StackEntry::Num(ONE))
     } else {
@@ -1724,31 +920,9 @@ pub fn op_greaterthan(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_lessthanorequal(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPLESSTHANOREQUAL, OPLESSTHANOREQUAL_DESC);
-    trace(op, desc);
-    let n2 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let n1 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_lessthanorequal(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n2 = pop_num(stack)?;
+    let n1 = pop_num(stack)?;
     if n1 <= n2 {
         stack.push(StackEntry::Num(ONE))
     } else {
@@ -1764,31 +938,9 @@ pub fn op_lessthanorequal(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_greaterthanorequal(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPGREATERTHANOREQUAL, OPGREATERTHANOREQUAL_DESC);
-    trace(op, desc);
-    let n2 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let n1 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_greaterthanorequal(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n2 = pop_num(stack)?;
+    let n1 = pop_num(stack)?;
     if n1 >= n2 {
         stack.push(StackEntry::Num(ONE))
     } else {
@@ -1804,31 +956,9 @@ pub fn op_greaterthanorequal(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_min(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPMIN, OPMIN_DESC);
-    trace(op, desc);
-    let n2 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let n1 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_min(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n2 = pop_num(stack)?;
+    let n1 = pop_num(stack)?;
     stack.push(StackEntry::Num(n1.min(n2)))
 }
 
@@ -1840,31 +970,9 @@ pub fn op_min(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_max(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPMAX, OPMAX_DESC);
-    trace(op, desc);
-    let n2 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let n1 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_max(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n2 = pop_num(stack)?;
+    let n1 = pop_num(stack)?;
     stack.push(StackEntry::Num(n1.max(n2)))
 }
 
@@ -1876,42 +984,10 @@ pub fn op_max(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_within(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPWITHIN, OPWITHIN_DESC);
-    trace(op, desc);
-    let n3 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let n2 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let n1 = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_within(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n3 = pop_num(stack)?;
+    let n2 = pop_num(stack)?;
+    let n1 = pop_num(stack)?;
     if n1 >= n2 && n1 < n3 {
         stack.push(StackEntry::Num(ONE))
     } else {
@@ -1928,25 +1004,16 @@ pub fn op_within(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_sha3(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPSHA3, OPSHA3_DESC);
-    trace(op, desc);
-    let data = match stack.pop() {
-        Some(StackEntry::Signature(sig)) => sig.as_ref().to_owned(),
-        Some(StackEntry::PubKey(pk)) => pk.as_ref().to_owned(),
-        Some(StackEntry::Bytes(s)) => {
+pub fn op_sha3(stack: &mut Stack) -> Result<(), ScriptError> {
+    let data = match stack.pop()? {
+        StackEntry::Signature(sig) => sig.as_ref().to_owned(),
+        StackEntry::PubKey(pk) => pk.as_ref().to_owned(),
+        StackEntry::Bytes(s) => {
             // For legacy reasons, the hashed data is the hex representation of the data rather than
             // the data itself.
             hex::encode(&s).as_bytes().to_owned()
         },
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
+        _ => return Err(ScriptError::ItemType),
     };
     let hash = sha3_256::digest(&data).to_vec();
     // TODO: Originally, the hash was converted back to hex!
@@ -1960,20 +1027,8 @@ pub fn op_sha3(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_hash256(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPHASH256, OPHASH256_DESC);
-    trace(op, desc);
-    let pk = match stack.pop() {
-        Some(StackEntry::PubKey(pk)) => pk,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_hash256(stack: &mut Stack) -> Result<(), ScriptError> {
+    let pk = pop_pubkey(stack)?;
     let addr = construct_address(&pk);
     stack.push(StackEntry::Bytes(hex::decode(addr).unwrap()))
 }
@@ -1988,42 +1043,10 @@ pub fn op_hash256(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_checksig(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPCHECKSIG, OPCHECKSIG_DESC);
-    trace(op, desc);
-    let pk = match stack.pop() {
-        Some(StackEntry::PubKey(pk)) => pk,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let sig = match stack.pop() {
-        Some(StackEntry::Signature(sig)) => sig,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let msg = match stack.pop() {
-        Some(StackEntry::Bytes(s)) => s,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_checksig(stack: &mut Stack) -> Result<(), ScriptError> {
+    let pk = pop_pubkey(stack)?;
+    let sig = pop_sig(stack)?;
+    let msg = pop_bytes(stack)?;
 
     // For legacy reasons, the signed message is the hex representation of the message rather than
     // the message itself.
@@ -2047,54 +1070,9 @@ pub fn op_checksig(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_checksigverify(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPCHECKSIGVERIFY, OPCHECKSIGVERIFY_DESC);
-    trace(op, desc);
-    let pk = match stack.pop() {
-        Some(StackEntry::PubKey(pk)) => pk,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let sig = match stack.pop() {
-        Some(StackEntry::Signature(sig)) => sig,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    let msg = match stack.pop() {
-        Some(StackEntry::Bytes(s)) => s,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-
-    // For legacy reasons, the signed message is the hex representation of the message rather than
-    // the message itself.
-    let msg_hex = hex::encode(msg);
-
-    trace!("Signature: {:?}", msg_hex);
-    if (!sign::verify_detached(&sig, msg_hex.as_bytes(), &pk)) {
-        trace!("Signature verification failed");
-        error_invalid_signature(op);
-        return false;
-    }
-    true
+pub fn op_checksigverify(stack: &mut Stack) -> Result<(), ScriptError> {
+    op_checksig(stack)?;
+    op_verify(stack)
 }
 
 /// OP_CHECKMULTISIG: Pushes ONE onto the stack if the m-of-n multi-signature is valid, ZERO otherwise
@@ -2108,70 +1086,34 @@ pub fn op_checksigverify(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_checkmultisig(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPCHECKMULTISIG, OPCHECKMULTISIG_DESC);
-    trace(op, desc);
-    let n = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+pub fn op_checkmultisig(stack: &mut Stack) -> Result<(), ScriptError> {
+    let n = pop_num(stack)?;
     if n > MAX_PUB_KEYS_PER_MULTISIG as usize {
-        error_num_pubkeys(op);
-        return false;
+        return Err(ScriptError::NumPubkeys);
     }
-    let mut pks = Vec::new();
-    while let Some(StackEntry::PubKey(_)) = stack.last() {
-        if let Some(StackEntry::PubKey(pk)) = stack.pop() {
+    let mut pks = Vec::with_capacity(n);
+    for i in 0..n {
+        if let Ok(StackEntry::PubKey(pk)) = stack.pop() {
             pks.push(pk);
         }
     }
     if pks.len() != n {
-        error_num_pubkeys(op);
-        return false;
+        return Err(ScriptError::NumPubkeys);
     }
-    let m = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+    let m = pop_num(stack)?;
     if m > n {
-        error_num_signatures(op);
-        return false;
+        return Err(ScriptError::NumSignatures);
     }
-    let mut sigs = Vec::new();
-    while let Some(StackEntry::Signature(_)) = stack.last() {
-        if let Some(StackEntry::Signature(sig)) = stack.pop() {
+    let mut sigs = Vec::with_capacity(m);
+    for i in 0..m {
+        if let Ok(StackEntry::Signature(sig)) = stack.pop() {
             sigs.push(sig);
         }
     }
     if sigs.len() != m {
-        error_num_signatures(op);
-        return false;
+        return Err(ScriptError::NumSignatures);
     }
-    let msg = match stack.pop() {
-        Some(StackEntry::Bytes(s)) => s,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
+    let msg = pop_bytes(stack)?;
     if !verify_multisig(&sigs, &msg, &mut pks) {
         stack.push(StackEntry::Num(ZERO))
     } else {
@@ -2187,75 +1129,9 @@ pub fn op_checkmultisig(stack: &mut Stack) -> bool {
 /// ### Arguments
 ///
 /// * `stack`  - mutable reference to the stack
-pub fn op_checkmultisigverify(stack: &mut Stack) -> bool {
-    let (op, desc) = (OPCHECKMULTISIG, OPCHECKMULTISIG_DESC);
-    trace(op, desc);
-    let n = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    if n > MAX_PUB_KEYS_PER_MULTISIG as usize {
-        error_num_pubkeys(op);
-        return false;
-    }
-    let mut pks = Vec::new();
-    while let Some(StackEntry::PubKey(_)) = stack.last() {
-        if let Some(StackEntry::PubKey(pk)) = stack.pop() {
-            pks.push(pk);
-        }
-    }
-    if pks.len() != n {
-        error_num_pubkeys(op);
-        return false;
-    }
-    let m = match stack.pop() {
-        Some(StackEntry::Num(n)) => n,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    if m > n {
-        error_num_signatures(op);
-        return false;
-    }
-    let mut sigs = Vec::new();
-    while let Some(StackEntry::Signature(_)) = stack.last() {
-        if let Some(StackEntry::Signature(sig)) = stack.pop() {
-            sigs.push(sig);
-        }
-    }
-    if sigs.len() != m {
-        error_num_signatures(op);
-        return false;
-    }
-    let msg = match stack.pop() {
-        Some(StackEntry::Bytes(s)) => s,
-        Some(_) => {
-            error_item_type(op);
-            return false;
-        }
-        _ => {
-            error_num_items(op);
-            return false;
-        }
-    };
-    if !verify_multisig(&sigs, &msg, &mut pks) {
-        error_invalid_multisignature(op);
-        return false;
-    }
-    true
+pub fn op_checkmultisigverify(stack: &mut Stack) -> Result<(), ScriptError> {
+    op_checkmultisig(stack)?;
+    op_verify(stack)
 }
 
 /// Verifies an m-of-n multi-signature
@@ -2282,4 +1158,64 @@ fn verify_multisig(sigs: &[Signature], msg: &[u8], pks: &mut Vec<PublicKey>) -> 
         }
     }
     num_valid_sigs == sigs.len()
+}
+
+/// Pops a number from the top of the stack
+///
+/// ### Arguments
+///
+/// * `stack` - a reference to the stack
+fn pop_num(stack: &mut Stack) -> Result<usize, ScriptError> {
+    match stack.pop()? {
+        StackEntry::Num(n) => Ok(n),
+        _ => return Err(ScriptError::ItemType),
+    }
+}
+
+/// Pops bytes from the top of the stack
+///
+/// ### Arguments
+///
+/// * `stack` - a reference to the stack
+fn pop_bytes(stack: &mut Stack) -> Result<Vec<u8>, ScriptError> {
+    match stack.pop()? {
+        StackEntry::Bytes(b) => Ok(b),
+        _ => return Err(ScriptError::ItemType),
+    }
+}
+
+/// Pops a public key from the top of the stack
+///
+/// ### Arguments
+///
+/// * `stack` - a reference to the stack
+fn pop_pubkey(stack: &mut Stack) -> Result<PublicKey, ScriptError> {
+    match stack.pop()? {
+        StackEntry::PubKey(pubkey) => Ok(pubkey),
+        _ => return Err(ScriptError::ItemType),
+    }
+}
+
+/// Pops a signature from the top of the stack
+///
+/// ### Arguments
+///
+/// * `stack` - a reference to the stack
+fn pop_sig(stack: &mut Stack) -> Result<Signature, ScriptError> {
+    match stack.pop()? {
+        StackEntry::Signature(sig) => Ok(sig),
+        _ => return Err(ScriptError::ItemType),
+    }
+}
+
+/// Gets the bytes at the top of the stack without popping them
+///
+/// ### Arguments
+///
+/// * `stack` - a reference to the stack
+fn peek_bytes(stack: &Stack) -> Result<&Vec<u8>, ScriptError> {
+    match stack.peek()? {
+        StackEntry::Bytes(b) => Ok(b),
+        _ => return Err(ScriptError::ItemType),
+    }
 }
