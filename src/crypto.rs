@@ -11,6 +11,7 @@ pub mod sign_ed25519 {
     pub use ring::signature::{ED25519, ED25519_PUBLIC_KEY_LEN};
     use serde::{Deserialize, Serialize};
     use std::convert::TryInto;
+    use std::ops::Deref;
     use tracing::warn;
 
     pub type PublicKeyBase = <SecretKey as KeyPair>::PublicKey;
@@ -136,7 +137,7 @@ pub mod sign_ed25519 {
 
     #[cfg(test)]
     pub fn gen_test_keypair(n: u64) -> (PublicKey, SecretKey) {
-        let seed : [u8; 32] = *super::sha3_256::digest(&n.to_le_bytes());
+        let seed : [u8; 32] = super::sha3_256::digest(&n.to_le_bytes()).deref().try_into().unwrap();
         let rand = ring::test::rand::FixedSliceSequenceRandom {
             bytes: &[ &seed ],
             current: core::cell::UnsafeCell::new(0),
