@@ -1382,9 +1382,9 @@ mod tests {
         // Arrange
         //
         let out_points = vec![
-            OutPoint::new("000000".to_owned(), 0),
-            OutPoint::new("000001".to_owned(), 0),
-            OutPoint::new("000002".to_owned(), 0),
+            OutPoint::new("g48dda5bbe9171a6656206ec56c595c5".to_owned(), 0),
+            OutPoint::new("gb875632ccf606eef2397124e6c2febf".to_owned(), 0),
+            OutPoint::new("g87ac5d1ddfa64329d8548b34c25ee5e".to_owned(), 0),
         ];
 
         //
@@ -1396,9 +1396,9 @@ mod tests {
             .collect();
 
         let expected: Vec<String> = vec![
-            "927b3411743452e5e0d73e9e40a4fa3c842b3d00dabde7f9af7e44661ce02c88".to_owned(),
-            "754dc248d1c847e8a10c6f8ded6ccad96381551ebb162583aea2a86b9bb78dfa".to_owned(),
-            "5585c6f74d5c55f1ab457c31671822ba28c78c397cce1e11680b9f3852f96edb".to_owned(),
+            "08b4e1d78424bfa8dffffa499142b8e9f1edc4db4ec645d2fd2a60be2e8b3d9c".to_owned(),
+            "7e335ddf926a4fa5c7817df622858226e68b929cead312e446df16e93108125c".to_owned(),
+            "47dc4464616705a240fd94cd88991b2c2446d9e859162a2f900c4036ff85dac3".to_owned(),
         ];
 
         //
@@ -1457,9 +1457,9 @@ mod tests {
         ];
 
         let previous_out_points = vec![
-            OutPoint::new("000000".to_owned(), 0),
-            OutPoint::new("000001".to_owned(), 0),
-            OutPoint::new("000002".to_owned(), 0),
+            OutPoint::new("g48dda5bbe9171a6656206ec56c595c5".to_owned(), 0),
+            OutPoint::new("gb875632ccf606eef2397124e6c2febf".to_owned(), 0),
+            OutPoint::new("g87ac5d1ddfa64329d8548b34c25ee5e".to_owned(), 0),
         ];
 
         //
@@ -1480,7 +1480,7 @@ mod tests {
             .collect();
 
         let expected =
-            "c8b62d379f07602956207ea473ce20d9752d24ad6e6cd43cb042d024d7c6a468".to_owned();
+            "f3d7b80f82f72260ba1b6235d608f0af871b7968ac1cde5ddf71a4a6b3385eec".to_owned();
         let actual = construct_tx_ins_address(&tx_ins);
 
         //
