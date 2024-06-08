@@ -273,6 +273,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fallible-iterator"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
+
+[[package]]
 name = "futures-core"
 version = "0.3.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1028,6 +1034,7 @@ dependencies = [
  "bincode",
  "bytes",
  "colored",
+ "fallible-iterator",
  "hex",
  "merkle-log",
  "rand",

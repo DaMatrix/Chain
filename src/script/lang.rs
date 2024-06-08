@@ -1,17 +1,22 @@
 #![allow(unused)]
 
+use std::convert::TryInto;
+use std::fmt;
+use std::fmt::Write;
 use bincode::{Decode, Encode};
+use fallible_iterator::FallibleIterator;
 use crate::constants::*;
 use crate::crypto::sha3_256;
 use crate::crypto::sign_ed25519::{
     PublicKey, Signature, ED25519_PUBLIC_KEY_LEN, ED25519_SIGNATURE_LEN,
 };
 use crate::script::interface_ops::*;
-use crate::script::{OpCodes, ScriptError, StackEntry};
+use crate::script::{OpCodes, ScriptEntry, ScriptError, StackEntry};
 use crate::utils::transaction_utils::construct_address;
 use serde::{Deserialize, Serialize};
 use tracing::{error, trace, warn};
-use crate::utils::serialize_utils::{bincode_decode_from_slice_standard, bincode_encode_to_write_standard};
+use crate::utils::serialize_utils::{bincode_borrow_decode_from_slice_standard, bincode_decode_from_slice_standard, bincode_encode_to_write_standard};
+use crate::utils::ToName;
 
 /// Stack for script execution
 #[derive(Clone, Debug, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
@@ -220,103 +225,148 @@ pub struct ScriptIterator<'a> {
 }
 
 impl<'a> ScriptIterator<'a> {
+    /// Gets a new `ScriptIterator` which will iterate over the script encoded in the given slice
     pub fn new(bytes: &'a [u8]) -> Self {
         Self { bytes }
     }
+}
+
+impl<'a> FallibleIterator for ScriptIterator<'a> {
+    type Item = ScriptEntry<'a>;
+    type Error = ScriptError;
 
     /// Reads the next opcode in the script.
     ///
     /// Returns an error if an opcode failed to decode, or None if the end of the script has
     /// been reached.
-    pub fn next(&mut self) -> Result<Option<OpCodes>, bincode::error::DecodeError> {
+    fn next(&mut self) -> Result<Option<Self::Item>, Self::Error> {
         if self.bytes.is_empty() {
             return Ok(None);
         }
 
-        match bincode_decode_from_slice_standard::<OpCodes>(self.bytes) {
+        match bincode_borrow_decode_from_slice_standard::<ScriptEntry<'a>>(self.bytes) {
             Ok((opcode, read_bytes)) => {
                 // Remove the first read_bytes from the slice
                 self.bytes = self.bytes.split_at(read_bytes).1;
                 Ok(Some(opcode))
             }
-            Err(e) => Err(e),
+            Err(e) => Err(ScriptError::Decode(e.to_string())),
         }
     }
 }
 
-#[derive(Clone, Debug)]
 pub struct ScriptBuilder {
     buf: Vec<u8>,
 }
 
 impl ScriptBuilder {
-    /// Creates a new `ScriptBuilder`.
+    /// Creates a new `ScriptBuilder` with an empty initial state
     pub fn new() -> Self {
         Self {
             buf: Vec::new(),
         }
     }
 
-    pub fn add(mut self, opcode: &OpCodes) -> Self {
-        bincode_encode_to_write_standard(opcode, &mut self.buf).unwrap();
-        self
+    /// Appends the given `ScriptEntry` to the script
+    ///
+    /// ### Arguments
+    ///
+    /// * `entry` - the `ScriptEntry` to append
+    pub fn push(&mut self, entry: &ScriptEntry) {
+        bincode_encode_to_write_standard(entry, &mut self.buf)
+            .expect("Failed to serialize script entry?!?");
     }
 
-    pub fn build(self) -> Vec<u8> {
-        self.buf
+    /// Appends all of the given script entries to the script
+    ///
+    /// ### Arguments
+    ///
+    /// * `entries` - the script entries to append
+    pub fn append_all(&mut self, entries: &[ScriptEntry]) {
+        for entry in entries {
+            self.push(entry);
+        }
+    }
+
+    /// Appends the given opcode to the script
+    ///
+    /// ### Arguments
+    ///
+    /// * `op` - the opcode to append
+    pub fn push_op(&mut self, op: OpCodes) {
+        self.push(&ScriptEntry::Op(op))
+    }
+
+    /// Appends the given data constant to the script
+    ///
+    /// ### Arguments
+    ///
+    /// * `data` - the data to append
+    pub fn push_data(&mut self, data: &[u8]) {
+        self.push(&ScriptEntry::Data(data))
+    }
+
+    /// Appends the given integer constant to the script
+    ///
+    /// ### Arguments
+    ///
+    /// * `num` - the integer to append
+    pub fn push_int(&mut self, int: u64) {
+        self.push(&ScriptEntry::Int(int))
+    }
+
+    /// Finishes building the script, returning it as a `Script` object
+    pub fn finish(self) -> Script {
+        self.buf.into()
     }
 }
 
 /// Scripts are defined as a sequence of stack entries
 /// NOTE: A tuple struct could probably work here as well
-#[derive(Clone, Debug, PartialOrd, Eq, PartialEq, Serialize, Deserialize, Encode, Decode)]
+#[derive(Clone, PartialOrd, Eq, PartialEq, Serialize, Deserialize, Encode, Decode)]
 pub struct Script {
-    pub stack: Vec<StackEntry>,
+    script: Vec<u8>,
 }
 
 impl Script {
     /// Constructs a new script
     pub fn new() -> Self {
-        Self { stack: Vec::new() }
+        Self { script: Vec::new() }
     }
 
-    /// Checks if a script is valid
-    pub fn is_valid(&self) -> bool {
-        self.verify().is_ok()
+    /// Creates a new script from the given script entries
+    pub fn build(entries: &[ScriptEntry]) -> Self {
+        let mut builder = ScriptBuilder::new();
+        builder.append_all(entries);
+        builder.finish()
+    }
+
+    /// Gets all the entries in this script.
+    pub fn to_entries(&self) -> Result<Vec<ScriptEntry>, ScriptError> {
+        ScriptIterator::new(&self.script).collect()
     }
 
     /// Checks if a script is valid
     pub fn verify(&self) -> Result<(), ScriptError> {
-        // TODO: The length doesn't really make sense, because the actual serialized script
-        //       is not actually this size...
-        let mut len = ZERO; // script length in bytes
-        let mut ops_count = ZERO; // number of opcodes in script
-        for entry in &self.stack {
-            match entry {
-                StackEntry::Op(_) => {
-                    len += ONE;
-                    ops_count += ONE;
-                }
-                StackEntry::Signature(_) => len += ED25519_SIGNATURE_LEN,
-                StackEntry::PubKey(_) => len += ED25519_PUBLIC_KEY_LEN,
-                StackEntry::Bytes(s) => len += s.len(),
-                StackEntry::Num(_) => len += usize::BITS as usize / EIGHT,
-            };
+        if self.script.len() > MAX_SCRIPT_SIZE as usize {
+            return Err(ScriptError::MaxScriptSize(self.script.len()));
         }
 
-        if len > MAX_SCRIPT_SIZE as usize {
-            return Err(ScriptError::MaxScriptSize(len));
-        } else if ops_count > MAX_OPS_PER_SCRIPT as usize {
+        let ops_count = ScriptIterator::new(&self.script)
+            .filter(|entry| Ok(matches!(entry, ScriptEntry::Op(_))))
+            .count()?; // number of opcodes in script
+        if ops_count > MAX_OPS_PER_SCRIPT as usize {
             return Err(ScriptError::MaxScriptOps(ops_count));
         }
 
         // Make sure all IF/NOTIF opcodes have a matching ENDIF, and that there is exactly
         // 0 or 1 ELSE opcodes between them.
         let mut condition_stack : Vec<bool> = Vec::new();
-        for entry in &self.stack {
+        let mut itr = ScriptIterator::new(&self.script);
+        while let Some(entry) = itr.next()? {
             match entry {
-                StackEntry::Op(OpCodes::OP_IF | OpCodes::OP_NOTIF) => condition_stack.push(false),
-                StackEntry::Op(OpCodes::OP_ELSE) => match condition_stack.last_mut() {
+                ScriptEntry::Op(OpCodes::OP_IF | OpCodes::OP_NOTIF) => condition_stack.push(false),
+                ScriptEntry::Op(OpCodes::OP_ELSE) => match condition_stack.last_mut() {
                     Some(seen_else) => {
                         if *seen_else {
                             return Err(ScriptError::DuplicateElse);
@@ -325,7 +375,7 @@ impl Script {
                     },
                     None => return Err(ScriptError::EmptyCondition),
                 },
-                StackEntry::Op(OpCodes::OP_ENDIF) => match condition_stack.pop() {
+                ScriptEntry::Op(OpCodes::OP_ENDIF) => match condition_stack.pop() {
                     Some(_) => (),
                     None => return Err(ScriptError::EmptyCondition),
                 },
@@ -346,36 +396,19 @@ impl Script {
         self.verify()?;
 
         let mut stack = Stack::new();
-        for stack_entry in &self.stack {
-            match stack_entry.clone() {
+        let mut itr = ScriptIterator::new(&self.script);
+        while let Some(entry) = itr.next()? {
+            match entry {
                 /*---- OPCODE ----*/
-                StackEntry::Op(op) => {
+                ScriptEntry::Op(op) => {
                     if !stack.cond_stack.all_true() && !op.is_conditional() {
                         // skip opcode if latest condition check failed
                         continue;
                     }
 
-                    trace!("{}: {}", op.name(), op.desc());
+                    trace!("{}: {}", op.to_name(), op.desc());
 
                     match op {
-                        // constants
-                        OpCodes::OP_0 => stack.push(StackEntry::Num(ZERO)),
-                        OpCodes::OP_1 => stack.push(StackEntry::Num(ONE)),
-                        OpCodes::OP_2 => stack.push(StackEntry::Num(TWO)),
-                        OpCodes::OP_3 => stack.push(StackEntry::Num(THREE)),
-                        OpCodes::OP_4 => stack.push(StackEntry::Num(FOUR)),
-                        OpCodes::OP_5 => stack.push(StackEntry::Num(FIVE)),
-                        OpCodes::OP_6 => stack.push(StackEntry::Num(SIX)),
-                        OpCodes::OP_7 => stack.push(StackEntry::Num(SEVEN)),
-                        OpCodes::OP_8 => stack.push(StackEntry::Num(EIGHT)),
-                        OpCodes::OP_9 => stack.push(StackEntry::Num(NINE)),
-                        OpCodes::OP_10 => stack.push(StackEntry::Num(TEN)),
-                        OpCodes::OP_11 => stack.push(StackEntry::Num(ELEVEN)),
-                        OpCodes::OP_12 => stack.push(StackEntry::Num(TWELVE)),
-                        OpCodes::OP_13 => stack.push(StackEntry::Num(THIRTEEN)),
-                        OpCodes::OP_14 => stack.push(StackEntry::Num(FOURTEEN)),
-                        OpCodes::OP_15 => stack.push(StackEntry::Num(FIFTEEN)),
-                        OpCodes::OP_16 => stack.push(StackEntry::Num(SIXTEEN)),
                         // flow control
                         OpCodes::OP_NOP => op_nop(&mut stack),
                         OpCodes::OP_IF => op_if(&mut stack),
@@ -455,18 +488,22 @@ impl Script {
                         // reserved
                         op => Err(ScriptError::ReservedOpcode(op)),
                     }
-                }
-                /*---- SIGNATURE | PUBKEY | NUM | BYTES ----*/
-                StackEntry::Signature(_)
-                | StackEntry::PubKey(_)
-                | StackEntry::Num(_)
-                | StackEntry::Bytes(_) => {
+                },
+                /*---- INT | DATA ----*/
+                ScriptEntry::Int(int) => {
                     if stack.cond_stack.all_true() {
-                        stack.push(stack_entry.clone())
+                        stack.push(StackEntry::Num(int as usize))
                     } else {
                         Ok(())
                     }
                 }
+                ScriptEntry::Data(data) => {
+                    if stack.cond_stack.all_true() {
+                        stack.push(StackEntry::Bytes(data.to_vec()))
+                    } else {
+                        Ok(())
+                    }
+                },
             }?;
 
             stack.check_preconditions()?;
@@ -481,8 +518,9 @@ impl Script {
     ///
     /// * `block_number`  - The block time to push
     pub fn new_for_coinbase(block_number: u64) -> Self {
-        let stack = vec![StackEntry::Num(block_number as usize)];
-        Self { stack }
+        let mut builder = ScriptBuilder::new();
+        builder.push_int(block_number);
+        builder.finish()
     }
 
     /// Constructs a new script for an asset creation
@@ -499,16 +537,15 @@ impl Script {
         signature: Signature,
         pub_key: PublicKey,
     ) -> Self {
-        let stack = vec![
-            StackEntry::Op(OpCodes::OP_CREATE),
-            StackEntry::Num(block_number as usize),
-            StackEntry::Op(OpCodes::OP_DROP),
-            StackEntry::Bytes(hex::decode(asset_hash).expect("asset_hash contains non-hex characters")),
-            StackEntry::Signature(signature),
-            StackEntry::PubKey(pub_key),
-            StackEntry::Op(OpCodes::OP_CHECKSIG),
-        ];
-        Self { stack }
+        let mut builder = ScriptBuilder::new();
+        builder.push_op(OpCodes::OP_CREATE);
+        builder.push_int(block_number);
+        builder.push_op(OpCodes::OP_DROP);
+        builder.push_data(&hex::decode(asset_hash).expect("asset_hash contains non-hex characters"));
+        builder.push_data(signature.as_ref());
+        builder.push_data(pub_key.as_ref());
+        builder.push_op(OpCodes::OP_CHECKSIG);
+        builder.finish()
     }
 
     /// Constructs a pay to public key hash script
@@ -523,18 +560,16 @@ impl Script {
         signature: Signature,
         pub_key: PublicKey,
     ) -> Self {
-        let stack = vec![
-            StackEntry::Bytes(check_data),
-            StackEntry::Signature(signature),
-            StackEntry::PubKey(pub_key),
-            StackEntry::Op(OpCodes::OP_DUP),
-            StackEntry::Op(OpCodes::OP_HASH256),
-            StackEntry::Bytes(hex::decode(construct_address(&pub_key))
-                .expect("address contains non-hex characters?")),
-            StackEntry::Op(OpCodes::OP_EQUALVERIFY),
-            StackEntry::Op(OpCodes::OP_CHECKSIG),
-        ];
-        Self { stack }
+        let mut builder = ScriptBuilder::new();
+        builder.push_data(check_data.as_ref());
+        builder.push_data(signature.as_ref());
+        builder.push_data(pub_key.as_ref());
+        builder.push_op(OpCodes::OP_DUP);
+        builder.push_op(OpCodes::OP_HASH256);
+        builder.push_data(&hex::decode(construct_address(&pub_key)).expect("address contains non-hex characters?"));
+        builder.push_op(OpCodes::OP_EQUALVERIFY);
+        builder.push_op(OpCodes::OP_CHECKSIG);
+        builder.finish()
     }
 
     /// Constructs one part of a multiparty transaction script
@@ -545,13 +580,12 @@ impl Script {
     /// * `pub_key`     - Public key of this party
     /// * `signature`   - Signature of this party
     pub fn member_multisig(check_data: Vec<u8>, pub_key: PublicKey, signature: Signature) -> Self {
-        let stack = vec![
-            StackEntry::Bytes(check_data),
-            StackEntry::Signature(signature),
-            StackEntry::PubKey(pub_key),
-            StackEntry::Op(OpCodes::OP_CHECKSIG),
-        ];
-        Self { stack }
+        let mut builder = ScriptBuilder::new();
+        builder.push_data(check_data.as_ref());
+        builder.push_data(signature.as_ref());
+        builder.push_data(pub_key.as_ref());
+        builder.push_op(OpCodes::OP_CHECKSIG);
+        builder.finish()
     }
 
     /// Constructs a multisig locking script
@@ -564,14 +598,15 @@ impl Script {
     pub fn multisig_lock(m: usize, check_data: Vec<u8>, pub_keys: Vec<PublicKey>) -> Self {
         assert!(m <= pub_keys.len());
 
-        let mut stack = vec![
-            StackEntry::Bytes(check_data),
-            StackEntry::Num(m),
-        ];
-        stack.append(&mut pub_keys.iter().map(|e| StackEntry::PubKey(*e)).collect());
-        stack.push(StackEntry::Num(pub_keys.len()));
-        stack.push(StackEntry::Op(OpCodes::OP_CHECKMULTISIG));
-        Self { stack }
+        let mut builder = ScriptBuilder::new();
+        builder.push_data(check_data.as_ref());
+        builder.push_int(m.try_into().unwrap());
+        for pubkey in &pub_keys {
+            builder.push_data(pubkey.as_ref());
+        }
+        builder.push_int(pub_keys.len().try_into().unwrap());
+        builder.push_op(OpCodes::OP_CHECKMULTISIG);
+        builder.finish()
     }
 
     /// Constructs a multisig unlocking script
@@ -581,14 +616,12 @@ impl Script {
     /// * `check_data`  - Data to have signed
     /// * `signatures`  - Signatures to unlock with
     pub fn multisig_unlock(check_data: Vec<u8>, signatures: Vec<Signature>) -> Self {
-        let mut stack = vec![StackEntry::Bytes(check_data)];
-        stack.append(
-            &mut signatures
-                .iter()
-                .map(|e| StackEntry::Signature(*e))
-                .collect(),
-        );
-        Self { stack }
+        let mut builder = ScriptBuilder::new();
+        builder.push_data(check_data.as_ref());
+        for signature in &signatures {
+            builder.push_data(signature.as_ref());
+        }
+        builder.finish()
     }
 
     /// Constructs a multisig validation script
@@ -606,24 +639,68 @@ impl Script {
     ) -> Self {
         assert!(signatures.len() <= pub_keys.len());
 
-        let mut stack = vec![StackEntry::Bytes(check_data)];
-        stack.append(
-            &mut signatures
-                .iter()
-                .map(|e| StackEntry::Signature(*e))
-                .collect(),
-        );
-        stack.push(StackEntry::Num(signatures.len()));
-        stack.append(&mut pub_keys.iter().map(|e| StackEntry::PubKey(*e)).collect());
-        stack.push(StackEntry::Num(pub_keys.len()));
-        stack.push(StackEntry::Op(OpCodes::OP_CHECKMULTISIG));
-        Self { stack }
+        let mut builder = ScriptBuilder::new();
+        builder.push_data(check_data.as_ref());
+        for signature in &signatures {
+            builder.push_data(signature.as_ref());
+        }
+        builder.push_int(signatures.len().try_into().unwrap());
+        for pubkey in &pub_keys {
+            builder.push_data(pubkey.as_ref());
+        }
+        builder.push_int(pub_keys.len().try_into().unwrap());
+        builder.push_op(OpCodes::OP_CHECKMULTISIG);
+        builder.finish()
     }
 }
 
-impl From<Vec<StackEntry>> for Script {
-    /// Creates a new script with a pre-filled stack
-    fn from(s: Vec<StackEntry>) -> Self {
-        Script { stack: s }
+impl From<Vec<u8>> for Script {
+    /// Creates a new script from the given opcodes
+    fn from(script: Vec<u8>) -> Self {
+        Script { script }
+    }
+}
+
+impl fmt::Display for Script {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut first = true;
+        for res in ScriptIterator::new(&self.script).iterator() {
+            if !first {
+                f.write_char(' ')?;
+            }
+            match res {
+                Ok(entry) => fmt::Display::fmt(&entry, f)?,
+                Err(err) => {
+                    f.write_str("<decode error>")?;
+                    return Err(fmt::Error);
+                },
+            };
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Debug for Script {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        struct Inner<'a>(&'a [u8]);
+        impl fmt::Debug for Inner<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                let mut list = f.debug_list();
+                for res in ScriptIterator::new(self.0).iterator() {
+                    match res {
+                        Ok(entry) => list.entry(&entry),
+                        Err(err) => {
+                            list.entry(&"<decode error>").entry(&err);
+                            break;
+                        },
+                    };
+                }
+                list.finish()
+            }
+        }
+
+        f.debug_tuple("Script")
+            .field(&Inner(&self.script))
+            .finish()
     }
 }

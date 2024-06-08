@@ -1,12 +1,12 @@
 use std::convert::TryInto;
-use bincode::Options;
 use serde::{Deserialize, Serialize};
-use crate::crypto::sign_ed25519::{PublicKey, Signature};
 use crate::primitives::asset::{Asset, ItemAsset, TokenAmount};
 use crate::primitives::druid::{DdeValues, DruidExpectation};
 use crate::primitives::transaction::*;
-use crate::script::lang::Script;
-use crate::script::{OpCodes, StackEntry};
+use crate::script::lang::{Script, ScriptBuilder};
+use crate::script::{OpCodes, ScriptError};
+use crate::utils::script_utils;
+use crate::utils::script_utils::MatchV6Script;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 struct V6PublicKey(
@@ -227,12 +227,6 @@ enum V6OpCodes {
     OP_NOP10 = 0xb9,
 }
 
-macro_rules! bincode_options { () => {
-    bincode::DefaultOptions::new()
-        .with_fixint_encoding()
-        .reject_trailing_bytes()
-}; }
-
 make_error_type!(pub enum FromV6Error {
     BadVersion(version: u64); "not a v6 transaction: {version}",
     DataRemaining(remaining: usize);
@@ -263,119 +257,117 @@ fn upgrade_v6_asset(old: &V6Asset) -> Result<Asset, FromV6Error> {
 }
 
 fn upgrade_v6_script(old: &V6Script) -> Result<Script, FromV6Error> {
-    Ok(Script::from(old.stack.iter()
-        .map(|entry| match entry {
+    let mut builder = ScriptBuilder::new();
+    for entry in &old.stack {
+        match entry {
             V6StackEntry::Op(op) => match op {
-                V6OpCodes::OP_0 => Ok(OpCodes::OP_0),
-                V6OpCodes::OP_1 => Ok(OpCodes::OP_1),
-                V6OpCodes::OP_2 => Ok(OpCodes::OP_2),
-                V6OpCodes::OP_3 => Ok(OpCodes::OP_3),
-                V6OpCodes::OP_4 => Ok(OpCodes::OP_4),
-                V6OpCodes::OP_5 => Ok(OpCodes::OP_5),
-                V6OpCodes::OP_6 => Ok(OpCodes::OP_6),
-                V6OpCodes::OP_7 => Ok(OpCodes::OP_7),
-                V6OpCodes::OP_8 => Ok(OpCodes::OP_8),
-                V6OpCodes::OP_9 => Ok(OpCodes::OP_9),
-                V6OpCodes::OP_10 => Ok(OpCodes::OP_10),
-                V6OpCodes::OP_11 => Ok(OpCodes::OP_11),
-                V6OpCodes::OP_12 => Ok(OpCodes::OP_12),
-                V6OpCodes::OP_13 => Ok(OpCodes::OP_13),
-                V6OpCodes::OP_14 => Ok(OpCodes::OP_14),
-                V6OpCodes::OP_15 => Ok(OpCodes::OP_15),
-                V6OpCodes::OP_16 => Ok(OpCodes::OP_16),
-                V6OpCodes::OP_NOP => Ok(OpCodes::OP_NOP),
-                V6OpCodes::OP_IF => Ok(OpCodes::OP_IF),
-                V6OpCodes::OP_NOTIF => Ok(OpCodes::OP_NOTIF),
-                V6OpCodes::OP_ELSE => Ok(OpCodes::OP_ELSE),
-                V6OpCodes::OP_ENDIF => Ok(OpCodes::OP_ENDIF),
-                V6OpCodes::OP_VERIFY => Ok(OpCodes::OP_VERIFY),
-                V6OpCodes::OP_BURN => Ok(OpCodes::OP_BURN),
-                V6OpCodes::OP_TOALTSTACK => Ok(OpCodes::OP_TOALTSTACK),
-                V6OpCodes::OP_FROMALTSTACK => Ok(OpCodes::OP_FROMALTSTACK),
-                V6OpCodes::OP_2DROP => Ok(OpCodes::OP_2DROP),
-                V6OpCodes::OP_2DUP => Ok(OpCodes::OP_2DUP),
-                V6OpCodes::OP_3DUP => Ok(OpCodes::OP_3DUP),
-                V6OpCodes::OP_2OVER => Ok(OpCodes::OP_2OVER),
-                V6OpCodes::OP_2ROT => Ok(OpCodes::OP_2ROT),
-                V6OpCodes::OP_2SWAP => Ok(OpCodes::OP_2SWAP),
-                V6OpCodes::OP_IFDUP => Ok(OpCodes::OP_IFDUP),
-                V6OpCodes::OP_DEPTH => Ok(OpCodes::OP_DEPTH),
-                V6OpCodes::OP_DROP => Ok(OpCodes::OP_DROP),
-                V6OpCodes::OP_DUP => Ok(OpCodes::OP_DUP),
-                V6OpCodes::OP_NIP => Ok(OpCodes::OP_NIP),
-                V6OpCodes::OP_OVER => Ok(OpCodes::OP_OVER),
-                V6OpCodes::OP_PICK => Ok(OpCodes::OP_PICK),
-                V6OpCodes::OP_ROLL => Ok(OpCodes::OP_ROLL),
-                V6OpCodes::OP_ROT => Ok(OpCodes::OP_ROT),
-                V6OpCodes::OP_SWAP => Ok(OpCodes::OP_SWAP),
-                V6OpCodes::OP_TUCK => Ok(OpCodes::OP_TUCK),
-                V6OpCodes::OP_CAT => Ok(OpCodes::OP_CAT),
-                V6OpCodes::OP_SUBSTR => Ok(OpCodes::OP_SUBSTR),
-                V6OpCodes::OP_LEFT => Ok(OpCodes::OP_LEFT),
-                V6OpCodes::OP_RIGHT => Ok(OpCodes::OP_RIGHT),
-                V6OpCodes::OP_SIZE => Ok(OpCodes::OP_SIZE),
-                V6OpCodes::OP_INVERT => Ok(OpCodes::OP_INVERT),
-                V6OpCodes::OP_AND => Ok(OpCodes::OP_AND),
-                V6OpCodes::OP_OR => Ok(OpCodes::OP_OR),
-                V6OpCodes::OP_XOR => Ok(OpCodes::OP_XOR),
-                V6OpCodes::OP_EQUAL => Ok(OpCodes::OP_EQUAL),
-                V6OpCodes::OP_EQUALVERIFY => Ok(OpCodes::OP_EQUALVERIFY),
-                V6OpCodes::OP_1ADD => Ok(OpCodes::OP_1ADD),
-                V6OpCodes::OP_1SUB => Ok(OpCodes::OP_1SUB),
-                V6OpCodes::OP_2MUL => Ok(OpCodes::OP_2MUL),
-                V6OpCodes::OP_2DIV => Ok(OpCodes::OP_2DIV),
-                V6OpCodes::OP_NOT => Ok(OpCodes::OP_NOT),
-                V6OpCodes::OP_0NOTEQUAL => Ok(OpCodes::OP_0NOTEQUAL),
-                V6OpCodes::OP_ADD => Ok(OpCodes::OP_ADD),
-                V6OpCodes::OP_SUB => Ok(OpCodes::OP_SUB),
-                V6OpCodes::OP_MUL => Ok(OpCodes::OP_MUL),
-                V6OpCodes::OP_DIV => Ok(OpCodes::OP_DIV),
-                V6OpCodes::OP_MOD => Ok(OpCodes::OP_MOD),
-                V6OpCodes::OP_LSHIFT => Ok(OpCodes::OP_LSHIFT),
-                V6OpCodes::OP_RSHIFT => Ok(OpCodes::OP_RSHIFT),
-                V6OpCodes::OP_BOOLAND => Ok(OpCodes::OP_BOOLAND),
-                V6OpCodes::OP_BOOLOR => Ok(OpCodes::OP_BOOLOR),
-                V6OpCodes::OP_NUMEQUAL => Ok(OpCodes::OP_NUMEQUAL),
-                V6OpCodes::OP_NUMEQUALVERIFY => Ok(OpCodes::OP_NUMEQUALVERIFY),
-                V6OpCodes::OP_NUMNOTEQUAL => Ok(OpCodes::OP_NUMNOTEQUAL),
-                V6OpCodes::OP_LESSTHAN => Ok(OpCodes::OP_LESSTHAN),
-                V6OpCodes::OP_GREATERTHAN => Ok(OpCodes::OP_GREATERTHAN),
-                V6OpCodes::OP_LESSTHANOREQUAL => Ok(OpCodes::OP_LESSTHANOREQUAL),
-                V6OpCodes::OP_GREATERTHANOREQUAL => Ok(OpCodes::OP_GREATERTHANOREQUAL),
-                V6OpCodes::OP_MIN => Ok(OpCodes::OP_MIN),
-                V6OpCodes::OP_MAX => Ok(OpCodes::OP_MAX),
-                V6OpCodes::OP_WITHIN => Ok(OpCodes::OP_WITHIN),
-                V6OpCodes::OP_SHA3 => Ok(OpCodes::OP_SHA3),
-                V6OpCodes::OP_HASH256 => Ok(OpCodes::OP_HASH256),
-                V6OpCodes::OP_HASH256_V0 => Err(FromV6Error::BadOpcode("OP_HASH256_V0")),
-                V6OpCodes::OP_HASH256_TEMP => Err(FromV6Error::BadOpcode("OP_HASH256_TEMP")),
-                V6OpCodes::OP_CHECKSIG => Ok(OpCodes::OP_CHECKSIG),
-                V6OpCodes::OP_CHECKSIGVERIFY => Ok(OpCodes::OP_CHECKSIGVERIFY),
-                V6OpCodes::OP_CHECKMULTISIG => Ok(OpCodes::OP_CHECKMULTISIG),
-                V6OpCodes::OP_CHECKMULTISIGVERIFY => Ok(OpCodes::OP_CHECKMULTISIGVERIFY),
-                V6OpCodes::OP_CREATE => Ok(OpCodes::OP_CREATE),
-                V6OpCodes::OP_NOP1 => Ok(OpCodes::OP_NOP1),
-                V6OpCodes::OP_NOP2 => Ok(OpCodes::OP_NOP2),
-                V6OpCodes::OP_NOP3 => Ok(OpCodes::OP_NOP3),
-                V6OpCodes::OP_NOP4 => Ok(OpCodes::OP_NOP4),
-                V6OpCodes::OP_NOP5 => Ok(OpCodes::OP_NOP5),
-                V6OpCodes::OP_NOP6 => Ok(OpCodes::OP_NOP6),
-                V6OpCodes::OP_NOP7 => Ok(OpCodes::OP_NOP7),
-                V6OpCodes::OP_NOP8 => Ok(OpCodes::OP_NOP8),
-                V6OpCodes::OP_NOP9 => Ok(OpCodes::OP_NOP9),
-                V6OpCodes::OP_NOP10 => Ok(OpCodes::OP_NOP10),
-            }.map(StackEntry::Op),
-            V6StackEntry::Signature(signature) =>
-                Ok(StackEntry::Signature(Signature::from_slice(&signature.0).unwrap())),
-            V6StackEntry::PubKey(pubkey) =>
-                Ok(StackEntry::PubKey(PublicKey::from_slice(&pubkey.0).unwrap())),
-            V6StackEntry::Num(num) =>
-                Ok(StackEntry::Num((*num).try_into().unwrap())),
-            V6StackEntry::Bytes(bytes) =>
-                Ok(StackEntry::Bytes(hex::decode(bytes)
-                    .map_err(|err| FromV6Error::NotHexBytes(bytes.clone(), err))?)),
-        })
-        .collect::<Result<Vec<_>, _>>()?))
+                V6OpCodes::OP_0 => builder.push_int(0),
+                V6OpCodes::OP_1 => builder.push_int(1),
+                V6OpCodes::OP_2 => builder.push_int(2),
+                V6OpCodes::OP_3 => builder.push_int(3),
+                V6OpCodes::OP_4 => builder.push_int(4),
+                V6OpCodes::OP_5 => builder.push_int(5),
+                V6OpCodes::OP_6 => builder.push_int(6),
+                V6OpCodes::OP_7 => builder.push_int(7),
+                V6OpCodes::OP_8 => builder.push_int(8),
+                V6OpCodes::OP_9 => builder.push_int(9),
+                V6OpCodes::OP_10 => builder.push_int(10),
+                V6OpCodes::OP_11 => builder.push_int(11),
+                V6OpCodes::OP_12 => builder.push_int(12),
+                V6OpCodes::OP_13 => builder.push_int(13),
+                V6OpCodes::OP_14 => builder.push_int(14),
+                V6OpCodes::OP_15 => builder.push_int(15),
+                V6OpCodes::OP_16 => builder.push_int(16),
+                V6OpCodes::OP_NOP => builder.push_op(OpCodes::OP_NOP),
+                V6OpCodes::OP_IF => builder.push_op(OpCodes::OP_IF),
+                V6OpCodes::OP_NOTIF => builder.push_op(OpCodes::OP_NOTIF),
+                V6OpCodes::OP_ELSE => builder.push_op(OpCodes::OP_ELSE),
+                V6OpCodes::OP_ENDIF => builder.push_op(OpCodes::OP_ENDIF),
+                V6OpCodes::OP_VERIFY => builder.push_op(OpCodes::OP_VERIFY),
+                V6OpCodes::OP_BURN => builder.push_op(OpCodes::OP_BURN),
+                V6OpCodes::OP_TOALTSTACK => builder.push_op(OpCodes::OP_TOALTSTACK),
+                V6OpCodes::OP_FROMALTSTACK => builder.push_op(OpCodes::OP_FROMALTSTACK),
+                V6OpCodes::OP_2DROP => builder.push_op(OpCodes::OP_2DROP),
+                V6OpCodes::OP_2DUP => builder.push_op(OpCodes::OP_2DUP),
+                V6OpCodes::OP_3DUP => builder.push_op(OpCodes::OP_3DUP),
+                V6OpCodes::OP_2OVER => builder.push_op(OpCodes::OP_2OVER),
+                V6OpCodes::OP_2ROT => builder.push_op(OpCodes::OP_2ROT),
+                V6OpCodes::OP_2SWAP => builder.push_op(OpCodes::OP_2SWAP),
+                V6OpCodes::OP_IFDUP => builder.push_op(OpCodes::OP_IFDUP),
+                V6OpCodes::OP_DEPTH => builder.push_op(OpCodes::OP_DEPTH),
+                V6OpCodes::OP_DROP => builder.push_op(OpCodes::OP_DROP),
+                V6OpCodes::OP_DUP => builder.push_op(OpCodes::OP_DUP),
+                V6OpCodes::OP_NIP => builder.push_op(OpCodes::OP_NIP),
+                V6OpCodes::OP_OVER => builder.push_op(OpCodes::OP_OVER),
+                V6OpCodes::OP_PICK => builder.push_op(OpCodes::OP_PICK),
+                V6OpCodes::OP_ROLL => builder.push_op(OpCodes::OP_ROLL),
+                V6OpCodes::OP_ROT => builder.push_op(OpCodes::OP_ROT),
+                V6OpCodes::OP_SWAP => builder.push_op(OpCodes::OP_SWAP),
+                V6OpCodes::OP_TUCK => builder.push_op(OpCodes::OP_TUCK),
+                V6OpCodes::OP_CAT => builder.push_op(OpCodes::OP_CAT),
+                V6OpCodes::OP_SUBSTR => builder.push_op(OpCodes::OP_SUBSTR),
+                V6OpCodes::OP_LEFT => builder.push_op(OpCodes::OP_LEFT),
+                V6OpCodes::OP_RIGHT => builder.push_op(OpCodes::OP_RIGHT),
+                V6OpCodes::OP_SIZE => builder.push_op(OpCodes::OP_SIZE),
+                V6OpCodes::OP_INVERT => builder.push_op(OpCodes::OP_INVERT),
+                V6OpCodes::OP_AND => builder.push_op(OpCodes::OP_AND),
+                V6OpCodes::OP_OR => builder.push_op(OpCodes::OP_OR),
+                V6OpCodes::OP_XOR => builder.push_op(OpCodes::OP_XOR),
+                V6OpCodes::OP_EQUAL => builder.push_op(OpCodes::OP_EQUAL),
+                V6OpCodes::OP_EQUALVERIFY => builder.push_op(OpCodes::OP_EQUALVERIFY),
+                V6OpCodes::OP_1ADD => builder.push_op(OpCodes::OP_1ADD),
+                V6OpCodes::OP_1SUB => builder.push_op(OpCodes::OP_1SUB),
+                V6OpCodes::OP_2MUL => builder.push_op(OpCodes::OP_2MUL),
+                V6OpCodes::OP_2DIV => builder.push_op(OpCodes::OP_2DIV),
+                V6OpCodes::OP_NOT => builder.push_op(OpCodes::OP_NOT),
+                V6OpCodes::OP_0NOTEQUAL => builder.push_op(OpCodes::OP_0NOTEQUAL),
+                V6OpCodes::OP_ADD => builder.push_op(OpCodes::OP_ADD),
+                V6OpCodes::OP_SUB => builder.push_op(OpCodes::OP_SUB),
+                V6OpCodes::OP_MUL => builder.push_op(OpCodes::OP_MUL),
+                V6OpCodes::OP_DIV => builder.push_op(OpCodes::OP_DIV),
+                V6OpCodes::OP_MOD => builder.push_op(OpCodes::OP_MOD),
+                V6OpCodes::OP_LSHIFT => builder.push_op(OpCodes::OP_LSHIFT),
+                V6OpCodes::OP_RSHIFT => builder.push_op(OpCodes::OP_RSHIFT),
+                V6OpCodes::OP_BOOLAND => builder.push_op(OpCodes::OP_BOOLAND),
+                V6OpCodes::OP_BOOLOR => builder.push_op(OpCodes::OP_BOOLOR),
+                V6OpCodes::OP_NUMEQUAL => builder.push_op(OpCodes::OP_NUMEQUAL),
+                V6OpCodes::OP_NUMEQUALVERIFY => builder.push_op(OpCodes::OP_NUMEQUALVERIFY),
+                V6OpCodes::OP_NUMNOTEQUAL => builder.push_op(OpCodes::OP_NUMNOTEQUAL),
+                V6OpCodes::OP_LESSTHAN => builder.push_op(OpCodes::OP_LESSTHAN),
+                V6OpCodes::OP_GREATERTHAN => builder.push_op(OpCodes::OP_GREATERTHAN),
+                V6OpCodes::OP_LESSTHANOREQUAL => builder.push_op(OpCodes::OP_LESSTHANOREQUAL),
+                V6OpCodes::OP_GREATERTHANOREQUAL => builder.push_op(OpCodes::OP_GREATERTHANOREQUAL),
+                V6OpCodes::OP_MIN => builder.push_op(OpCodes::OP_MIN),
+                V6OpCodes::OP_MAX => builder.push_op(OpCodes::OP_MAX),
+                V6OpCodes::OP_WITHIN => builder.push_op(OpCodes::OP_WITHIN),
+                V6OpCodes::OP_SHA3 => builder.push_op(OpCodes::OP_SHA3),
+                V6OpCodes::OP_HASH256 => builder.push_op(OpCodes::OP_HASH256),
+                V6OpCodes::OP_HASH256_V0 => return Err(FromV6Error::BadOpcode("OP_HASH256_V0")),
+                V6OpCodes::OP_HASH256_TEMP => return Err(FromV6Error::BadOpcode("OP_HASH256_TEMP")),
+                V6OpCodes::OP_CHECKSIG => builder.push_op(OpCodes::OP_CHECKSIG),
+                V6OpCodes::OP_CHECKSIGVERIFY => builder.push_op(OpCodes::OP_CHECKSIGVERIFY),
+                V6OpCodes::OP_CHECKMULTISIG => builder.push_op(OpCodes::OP_CHECKMULTISIG),
+                V6OpCodes::OP_CHECKMULTISIGVERIFY => builder.push_op(OpCodes::OP_CHECKMULTISIGVERIFY),
+                V6OpCodes::OP_CREATE => builder.push_op(OpCodes::OP_CREATE),
+                V6OpCodes::OP_NOP1 => builder.push_op(OpCodes::OP_NOP1),
+                V6OpCodes::OP_NOP2 => builder.push_op(OpCodes::OP_NOP2),
+                V6OpCodes::OP_NOP3 => builder.push_op(OpCodes::OP_NOP3),
+                V6OpCodes::OP_NOP4 => builder.push_op(OpCodes::OP_NOP4),
+                V6OpCodes::OP_NOP5 => builder.push_op(OpCodes::OP_NOP5),
+                V6OpCodes::OP_NOP6 => builder.push_op(OpCodes::OP_NOP6),
+                V6OpCodes::OP_NOP7 => builder.push_op(OpCodes::OP_NOP7),
+                V6OpCodes::OP_NOP8 => builder.push_op(OpCodes::OP_NOP8),
+                V6OpCodes::OP_NOP9 => builder.push_op(OpCodes::OP_NOP9),
+                V6OpCodes::OP_NOP10 => builder.push_op(OpCodes::OP_NOP10),
+            },
+            V6StackEntry::Signature(signature) => builder.push_data(&signature.0),
+            V6StackEntry::PubKey(pubkey) => builder.push_data(&pubkey.0),
+            V6StackEntry::Num(num) => builder.push_int(*num),
+            V6StackEntry::Bytes(bytes) => builder.push_data(&hex::decode(bytes)
+                    .map_err(|err| FromV6Error::NotHexBytes(bytes.clone(), err))?),
+        }
+    }
+    Ok(builder.finish())
 }
 
 fn upgrade_v6_outpoint(old: &V6OutPoint) -> Result<OutPoint, FromV6Error> {
@@ -456,6 +448,8 @@ make_error_type!(pub enum ToV6Error {
     BadOpcode(name: &'static str); "script contained unsupported opcode \"{name}\"",
     NotHexBytes(bytes: String, cause: hex::FromHexError);
         "script contained invalid hex bytes: \"{bytes}\": {cause}"; cause,
+    CantDecodeScript(cause: ScriptError); "failed to decode script: {cause}"; cause,
+    BadScript; "script doesn't match any known v6 patterns",
 
     BadOutPointIndex(index: u32); "outpoint index too high: {index}",
 
@@ -475,121 +469,35 @@ fn downgrade_v6_asset(old: &Asset) -> Result<V6Asset, ToV6Error> {
     }
 }
 
-fn downgrade_v6_script(old: &Script) -> Result<V6Script, ToV6Error> {
+fn downgrade_v6_script(script: &Script) -> Result<V6Script, ToV6Error> {
+    let v6_script = match script_utils::match_v6_script(script).expect("unknown or unsupported v6 script") {
+        MatchV6Script::Coinbase { block_number } =>
+            vec![ V6StackEntry::Num(block_number) ],
+        MatchV6Script::Create { block_number, asset_hash, signature, public_key } =>
+            vec![
+                V6StackEntry::Op(V6OpCodes::OP_CREATE),
+                V6StackEntry::Num(block_number),
+                V6StackEntry::Op(V6OpCodes::OP_DROP),
+                V6StackEntry::Bytes(hex::encode(asset_hash)),
+                V6StackEntry::Signature(V6Signature(signature.as_ref().try_into().unwrap())),
+                V6StackEntry::PubKey(V6PublicKey(public_key.as_ref().try_into().unwrap())),
+                V6StackEntry::Op(V6OpCodes::OP_CHECKSIG),
+            ],
+        MatchV6Script::P2PKH { check_data, signature, public_key, public_key_hash } =>
+            vec![
+                V6StackEntry::Bytes(hex::encode(check_data)),
+                V6StackEntry::Signature(V6Signature(signature.as_ref().try_into().unwrap())),
+                V6StackEntry::PubKey(V6PublicKey(public_key.as_ref().try_into().unwrap())),
+                V6StackEntry::Op(V6OpCodes::OP_DUP),
+                V6StackEntry::Op(V6OpCodes::OP_HASH256),
+                V6StackEntry::Bytes(hex::encode(public_key_hash)),
+                V6StackEntry::Op(V6OpCodes::OP_EQUALVERIFY),
+                V6StackEntry::Op(V6OpCodes::OP_CHECKSIG),
+            ],
+    };
+
     Ok(V6Script {
-        stack: old.stack.iter()
-            .map(|entry| match entry {
-                StackEntry::Op(op) => match op {
-                    OpCodes::OP_0 => Ok(V6OpCodes::OP_0),
-                    OpCodes::OP_1 => Ok(V6OpCodes::OP_1),
-                    OpCodes::OP_2 => Ok(V6OpCodes::OP_2),
-                    OpCodes::OP_3 => Ok(V6OpCodes::OP_3),
-                    OpCodes::OP_4 => Ok(V6OpCodes::OP_4),
-                    OpCodes::OP_5 => Ok(V6OpCodes::OP_5),
-                    OpCodes::OP_6 => Ok(V6OpCodes::OP_6),
-                    OpCodes::OP_7 => Ok(V6OpCodes::OP_7),
-                    OpCodes::OP_8 => Ok(V6OpCodes::OP_8),
-                    OpCodes::OP_9 => Ok(V6OpCodes::OP_9),
-                    OpCodes::OP_10 => Ok(V6OpCodes::OP_10),
-                    OpCodes::OP_11 => Ok(V6OpCodes::OP_11),
-                    OpCodes::OP_12 => Ok(V6OpCodes::OP_12),
-                    OpCodes::OP_13 => Ok(V6OpCodes::OP_13),
-                    OpCodes::OP_14 => Ok(V6OpCodes::OP_14),
-                    OpCodes::OP_15 => Ok(V6OpCodes::OP_15),
-                    OpCodes::OP_16 => Ok(V6OpCodes::OP_16),
-                    OpCodes::OP_NOP => Ok(V6OpCodes::OP_NOP),
-                    OpCodes::OP_IF => Ok(V6OpCodes::OP_IF),
-                    OpCodes::OP_NOTIF => Ok(V6OpCodes::OP_NOTIF),
-                    OpCodes::OP_ELSE => Ok(V6OpCodes::OP_ELSE),
-                    OpCodes::OP_ENDIF => Ok(V6OpCodes::OP_ENDIF),
-                    OpCodes::OP_VERIFY => Ok(V6OpCodes::OP_VERIFY),
-                    OpCodes::OP_BURN => Ok(V6OpCodes::OP_BURN),
-                    OpCodes::OP_TOALTSTACK => Ok(V6OpCodes::OP_TOALTSTACK),
-                    OpCodes::OP_FROMALTSTACK => Ok(V6OpCodes::OP_FROMALTSTACK),
-                    OpCodes::OP_2DROP => Ok(V6OpCodes::OP_2DROP),
-                    OpCodes::OP_2DUP => Ok(V6OpCodes::OP_2DUP),
-                    OpCodes::OP_3DUP => Ok(V6OpCodes::OP_3DUP),
-                    OpCodes::OP_2OVER => Ok(V6OpCodes::OP_2OVER),
-                    OpCodes::OP_2ROT => Ok(V6OpCodes::OP_2ROT),
-                    OpCodes::OP_2SWAP => Ok(V6OpCodes::OP_2SWAP),
-                    OpCodes::OP_IFDUP => Ok(V6OpCodes::OP_IFDUP),
-                    OpCodes::OP_DEPTH => Ok(V6OpCodes::OP_DEPTH),
-                    OpCodes::OP_DROP => Ok(V6OpCodes::OP_DROP),
-                    OpCodes::OP_DUP => Ok(V6OpCodes::OP_DUP),
-                    OpCodes::OP_NIP => Ok(V6OpCodes::OP_NIP),
-                    OpCodes::OP_OVER => Ok(V6OpCodes::OP_OVER),
-                    OpCodes::OP_PICK => Ok(V6OpCodes::OP_PICK),
-                    OpCodes::OP_ROLL => Ok(V6OpCodes::OP_ROLL),
-                    OpCodes::OP_ROT => Ok(V6OpCodes::OP_ROT),
-                    OpCodes::OP_SWAP => Ok(V6OpCodes::OP_SWAP),
-                    OpCodes::OP_TUCK => Ok(V6OpCodes::OP_TUCK),
-                    OpCodes::OP_CAT => Ok(V6OpCodes::OP_CAT),
-                    OpCodes::OP_SUBSTR => Ok(V6OpCodes::OP_SUBSTR),
-                    OpCodes::OP_LEFT => Ok(V6OpCodes::OP_LEFT),
-                    OpCodes::OP_RIGHT => Ok(V6OpCodes::OP_RIGHT),
-                    OpCodes::OP_SIZE => Ok(V6OpCodes::OP_SIZE),
-                    OpCodes::OP_INVERT => Ok(V6OpCodes::OP_INVERT),
-                    OpCodes::OP_AND => Ok(V6OpCodes::OP_AND),
-                    OpCodes::OP_OR => Ok(V6OpCodes::OP_OR),
-                    OpCodes::OP_XOR => Ok(V6OpCodes::OP_XOR),
-                    OpCodes::OP_EQUAL => Ok(V6OpCodes::OP_EQUAL),
-                    OpCodes::OP_EQUALVERIFY => Ok(V6OpCodes::OP_EQUALVERIFY),
-                    OpCodes::OP_1ADD => Ok(V6OpCodes::OP_1ADD),
-                    OpCodes::OP_1SUB => Ok(V6OpCodes::OP_1SUB),
-                    OpCodes::OP_2MUL => Ok(V6OpCodes::OP_2MUL),
-                    OpCodes::OP_2DIV => Ok(V6OpCodes::OP_2DIV),
-                    OpCodes::OP_NOT => Ok(V6OpCodes::OP_NOT),
-                    OpCodes::OP_0NOTEQUAL => Ok(V6OpCodes::OP_0NOTEQUAL),
-                    OpCodes::OP_ADD => Ok(V6OpCodes::OP_ADD),
-                    OpCodes::OP_SUB => Ok(V6OpCodes::OP_SUB),
-                    OpCodes::OP_MUL => Ok(V6OpCodes::OP_MUL),
-                    OpCodes::OP_DIV => Ok(V6OpCodes::OP_DIV),
-                    OpCodes::OP_MOD => Ok(V6OpCodes::OP_MOD),
-                    OpCodes::OP_LSHIFT => Ok(V6OpCodes::OP_LSHIFT),
-                    OpCodes::OP_RSHIFT => Ok(V6OpCodes::OP_RSHIFT),
-                    OpCodes::OP_BOOLAND => Ok(V6OpCodes::OP_BOOLAND),
-                    OpCodes::OP_BOOLOR => Ok(V6OpCodes::OP_BOOLOR),
-                    OpCodes::OP_NUMEQUAL => Ok(V6OpCodes::OP_NUMEQUAL),
-                    OpCodes::OP_NUMEQUALVERIFY => Ok(V6OpCodes::OP_NUMEQUALVERIFY),
-                    OpCodes::OP_NUMNOTEQUAL => Ok(V6OpCodes::OP_NUMNOTEQUAL),
-                    OpCodes::OP_LESSTHAN => Ok(V6OpCodes::OP_LESSTHAN),
-                    OpCodes::OP_GREATERTHAN => Ok(V6OpCodes::OP_GREATERTHAN),
-                    OpCodes::OP_LESSTHANOREQUAL => Ok(V6OpCodes::OP_LESSTHANOREQUAL),
-                    OpCodes::OP_GREATERTHANOREQUAL => Ok(V6OpCodes::OP_GREATERTHANOREQUAL),
-                    OpCodes::OP_MIN => Ok(V6OpCodes::OP_MIN),
-                    OpCodes::OP_MAX => Ok(V6OpCodes::OP_MAX),
-                    OpCodes::OP_WITHIN => Ok(V6OpCodes::OP_WITHIN),
-                    OpCodes::OP_SHA3 => Ok(V6OpCodes::OP_SHA3),
-                    OpCodes::OP_HASH256 => Ok(V6OpCodes::OP_HASH256),
-                    OpCodes::OP_CHECKSIG => Ok(V6OpCodes::OP_CHECKSIG),
-                    OpCodes::OP_CHECKSIGVERIFY => Ok(V6OpCodes::OP_CHECKSIGVERIFY),
-                    OpCodes::OP_CHECKMULTISIG => Ok(V6OpCodes::OP_CHECKMULTISIG),
-                    OpCodes::OP_CHECKMULTISIGVERIFY => Ok(V6OpCodes::OP_CHECKMULTISIGVERIFY),
-                    OpCodes::OP_CREATE => Ok(V6OpCodes::OP_CREATE),
-                    OpCodes::OP_NOP1 => Ok(V6OpCodes::OP_NOP1),
-                    OpCodes::OP_NOP2 => Ok(V6OpCodes::OP_NOP2),
-                    OpCodes::OP_NOP3 => Ok(V6OpCodes::OP_NOP3),
-                    OpCodes::OP_NOP4 => Ok(V6OpCodes::OP_NOP4),
-                    OpCodes::OP_NOP5 => Ok(V6OpCodes::OP_NOP5),
-                    OpCodes::OP_NOP6 => Ok(V6OpCodes::OP_NOP6),
-                    OpCodes::OP_NOP7 => Ok(V6OpCodes::OP_NOP7),
-                    OpCodes::OP_NOP8 => Ok(V6OpCodes::OP_NOP8),
-                    OpCodes::OP_NOP9 => Ok(V6OpCodes::OP_NOP9),
-                    OpCodes::OP_NOP10 => Ok(V6OpCodes::OP_NOP10),
-                    OpCodes::OP_NOP11 => Err(ToV6Error::BadOpcode("OP_NOP11")),
-                    OpCodes::OP_NOP12 => Err(ToV6Error::BadOpcode("OP_NOP12")),
-                    _ => Err(ToV6Error::BadOpcode("???")), //TODO
-                }.map(V6StackEntry::Op),
-                StackEntry::Signature(signature) =>
-                    Ok(V6StackEntry::Signature(V6Signature(signature.as_ref().try_into().unwrap()))),
-                StackEntry::PubKey(pubkey) =>
-                    Ok(V6StackEntry::PubKey(V6PublicKey(pubkey.as_ref().try_into().unwrap()))),
-                StackEntry::Num(num) =>
-                    Ok(V6StackEntry::Num((*num).try_into().unwrap())),
-                StackEntry::Bytes(bytes) =>
-                    Ok(V6StackEntry::Bytes(hex::encode(bytes))),
-            })
-            .collect::<Result<Vec<_>, _>>()?,
+        stack: v6_script,
     })
 }
 
@@ -725,11 +633,9 @@ mod tests {
     use crate::crypto::sign_ed25519;
     use crate::crypto::sign_ed25519::{PublicKey, SecretKey};
     use crate::primitives::asset::{Asset, AssetValues, ItemAsset, TokenAmount};
-    use crate::primitives::transaction::{OutPoint, Transaction, TxConstructor, TxIn, TxOut};
+    use crate::primitives::transaction::{OutPoint, Transaction, TxConstructor, TxIn};
     use crate::utils::{script_utils, transaction_utils};
     use crate::utils::transaction_utils::ReceiverInfo;
-
-    const STANDARD_ADDRESS_LENGTH_BYTES : usize = STANDARD_ADDRESS_LENGTH / 2;
 
     fn test_construct_valid_inputs() -> (Vec<TxIn>, BTreeMap<OutPoint, (PublicKey, SecretKey)>) {
         let (_pk, sk) = sign_ed25519::gen_test_keypair(0).unwrap();
@@ -744,7 +650,6 @@ mod tests {
             previous_out: prev_out,
             signatures: vec![],
             pub_keys: vec![pk],
-            address_version: None,
         };
 
         let tx_ins = transaction_utils::construct_payment_tx_ins(vec![tx_const]);
@@ -909,7 +814,6 @@ mod tests {
             previous_out: prev_out,
             signatures: vec![],
             pub_keys: vec![pk],
-            address_version: None,
         };
 
         let token_amount = TokenAmount(400000);
@@ -936,7 +840,6 @@ mod tests {
             previous_out: tx_1_out_p.clone(),
             signatures: vec![],
             pub_keys: vec![pk],
-            address_version: None,
         };
         let tx_ins_2 = transaction_utils::construct_payment_tx_ins(vec![tx_2]);
         let payment_tx_2 = transaction_utils::construct_payment_tx(

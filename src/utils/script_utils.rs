@@ -9,7 +9,7 @@ use crate::primitives::druid::DruidExpectation;
 use crate::primitives::transaction::*;
 use crate::script::interface_ops::*;
 use crate::script::lang::{ConditionStack, Script, Stack};
-use crate::script::{OpCodes, ScriptError, StackEntry};
+use crate::script::{OpCodes, ScriptEntry, ScriptError, StackEntry};
 use crate::utils::transaction_utils::{
     construct_address, construct_tx_hash, construct_tx_in_out_signable_hash,
     construct_tx_in_signable_asset_hash, construct_tx_in_signable_hash,
@@ -18,6 +18,7 @@ use ring::error;
 use std::collections::{BTreeMap, BTreeSet};
 use std::thread::current;
 use tracing::{debug, error, info, trace};
+use crate::utils::array_match_slice_copy;
 
 use super::transaction_utils::construct_p2sh_address;
 
@@ -153,7 +154,42 @@ pub fn tx_outs_are_valid(tx_outs: &[TxOut], fees: &[TxOut], tx_ins_spent: AssetV
     tx_outs_spent.is_equal(&tx_ins_spent)
 }
 
-/// Checks if a script matches the P2PKH pattern and extracts the relevant fields.
+pub enum MatchV6Script<'a> {
+    Coinbase { 
+        block_number: u64,
+    },
+    Create {
+        block_number: u64,
+        asset_hash: &'a [u8],
+        signature: Signature,
+        public_key: PublicKey,
+    },
+    P2PKH {
+        check_data: &'a [u8],
+        signature: Signature,
+        public_key: PublicKey,
+        public_key_hash: &'a [u8],
+    },
+}
+
+/// Checks if a script matches any of the known v6 script patterns and extracts the relevant fields.
+///
+/// ### Arguments
+///
+/// * `script`      - Script to match
+pub fn match_v6_script(script: &Script) -> Result<MatchV6Script, Script> {
+    if let Some(block_number) = match_coinbase_script(script) {
+        Ok(MatchV6Script::Coinbase { block_number })
+    } else if let Some((check_data, signature, public_key, public_key_hash)) = match_p2pkh_script(script) {
+        Ok(MatchV6Script::P2PKH { check_data, signature, public_key, public_key_hash })
+    } else if let Some((block_number, asset_hash, signature, public_key)) = match_create_script(script) {
+        Ok(MatchV6Script::Create { block_number, asset_hash, signature, public_key })
+    } else {
+        Err(script.clone())
+    }
+}
+
+/// Checks if a script matches the coinbase pattern and extracts the relevant fields.
 ///
 /// ### Arguments
 ///
@@ -161,15 +197,10 @@ pub fn tx_outs_are_valid(tx_outs: &[TxOut], fees: &[TxOut], tx_ins_spent: AssetV
 pub fn match_coinbase_script(
     script: &Script,
 ) -> Option<u64> {
-    let mut it = script.stack.iter();
-    if let (
-        Some(StackEntry::Num(block_number)),
-        None,
-    ) = (
-        it.next(),
-        it.next(),
-    ) {
-        Some(*block_number as u64)
+    if let Some([
+                ScriptEntry::Int(block_number),
+                ]) = array_match_slice_copy(&script.to_entries().ok()?) {
+        Some(block_number)
     } else {
         None
     }
@@ -182,28 +213,22 @@ pub fn match_coinbase_script(
 /// * `script`      - Script to match
 pub fn match_create_script(
     script: &Script,
-) -> Option<(u64, &Vec<u8>, &Signature, &PublicKey)> {
-    let mut it = script.stack.iter();
-    if let (
-        Some(StackEntry::Op(OpCodes::OP_CREATE)),
-        Some(StackEntry::Num(block_number)),
-        Some(StackEntry::Op(OpCodes::OP_DROP)),
-        Some(StackEntry::Bytes(b)),
-        Some(StackEntry::Signature(signature)),
-        Some(StackEntry::PubKey(public_key)),
-        Some(StackEntry::Op(OpCodes::OP_CHECKSIG)),
-        None,
-    ) = (
-        it.next(),
-        it.next(),
-        it.next(),
-        it.next(),
-        it.next(),
-        it.next(),
-        it.next(),
-        it.next(),
-    ) {
-        Some((*block_number as u64, b, signature, public_key))
+) -> Option<(u64, &[u8], Signature, PublicKey)> {
+    if let Some([
+                ScriptEntry::Op(OpCodes::OP_CREATE),
+                ScriptEntry::Int(block_number),
+                ScriptEntry::Op(OpCodes::OP_DROP),
+                ScriptEntry::Data(b),
+                ScriptEntry::Data(signature),
+                ScriptEntry::Data(public_key),
+                ScriptEntry::Op(OpCodes::OP_CHECKSIG),
+                ]) = array_match_slice_copy(&script.to_entries().ok()?) {
+        Some((
+            block_number,
+            b,
+            Signature::from_slice(signature)?,
+            PublicKey::from_slice(public_key)?,
+        ))
     } else {
         None
     }
@@ -235,7 +260,7 @@ pub fn tx_has_valid_create_script(script: &Script, asset: &Asset) -> bool {
         }
     }
 
-    trace!("Invalid script for create: {:?}", script.stack,);
+    trace!("Invalid script for create: {:?}", script);
     false
 }
 
@@ -246,30 +271,23 @@ pub fn tx_has_valid_create_script(script: &Script, asset: &Asset) -> bool {
 /// * `script`      - Script to match
 pub fn match_p2pkh_script(
     script: &Script,
-) -> Option<(&Vec<u8>, &Signature, &PublicKey, &Vec<u8>)> {
-    let mut it = script.stack.iter();
-    if let (
-        Some(StackEntry::Bytes(check_data)),
-        Some(StackEntry::Signature(signature)),
-        Some(StackEntry::PubKey(public_key)),
-        Some(StackEntry::Op(OpCodes::OP_DUP)),
-        Some(StackEntry::Op(OpCodes::OP_HASH256)),
-        Some(StackEntry::Bytes(public_key_hash)),
-        Some(StackEntry::Op(OpCodes::OP_EQUALVERIFY)),
-        Some(StackEntry::Op(OpCodes::OP_CHECKSIG)),
-        None,
-    ) = (
-        it.next(),
-        it.next(),
-        it.next(),
-        it.next(),
-        it.next(),
-        it.next(),
-        it.next(),
-        it.next(),
-        it.next(),
-    ) {
-        Some((check_data, signature, public_key, public_key_hash))
+) -> Option<(&[u8], Signature, PublicKey, &[u8])> {
+    if let Some([
+                ScriptEntry::Data(check_data),
+                ScriptEntry::Data(signature),
+                ScriptEntry::Data(public_key),
+                ScriptEntry::Op(OpCodes::OP_DUP),
+                ScriptEntry::Op(OpCodes::OP_HASH256),
+                ScriptEntry::Data(public_key_hash),
+                ScriptEntry::Op(OpCodes::OP_EQUALVERIFY),
+                ScriptEntry::Op(OpCodes::OP_CHECKSIG),
+                ]) = array_match_slice_copy(&script.to_entries().ok()?) {
+        Some((
+            check_data,
+            Signature::from_slice(signature)?,
+            PublicKey::from_slice(public_key)?,
+            public_key_hash,
+        ))
     } else {
         None
     }
@@ -284,9 +302,7 @@ pub fn match_p2pkh_script(
 /// * `tx_out_pub_key`  - Public key of the previous tx_out
 // TODO: The last two operands should be converted to the corresponding types
 fn tx_has_valid_p2pkh_sig(script: &Script, outpoint_hash: &str, tx_out_pub_key: &str) -> bool {
-    let mut it = script.stack.iter();
-
-    debug!("script: {:?}", script.stack);
+    debug!("script: {:?}", script);
 
     if let Some((b, _, _, h)) = match_p2pkh_script(script) {
         debug!("b: {:?}, h: {:?}", b, h);
@@ -303,7 +319,7 @@ fn tx_has_valid_p2pkh_sig(script: &Script, outpoint_hash: &str, tx_out_pub_key: 
 
     trace!(
         "Invalid P2PKH script: {:?} tx_out_pub_key: {}",
-        script.stack,
+        script,
         tx_out_pub_key
     );
 
@@ -325,7 +341,7 @@ pub fn tx_has_valid_p2sh_script(script: &Script, address: &str) -> bool {
 
     trace!(
         "Invalid P2SH script: {:?}, address: {}",
-        script.stack,
+        script,
         address
     );
 
@@ -2388,24 +2404,36 @@ mod tests {
     #[test]
     fn test_is_valid_script() {
         // empty script
-        let v = vec![];
-        let script = Script::from(v);
+        let v = &[];
+        let script = Script::build(v);
         assert_eq!(script.verify(), Ok(()));
         // script length <= 10000 bytes
-        let v = vec![StackEntry::Bytes("a".repeat(500).as_bytes().to_vec()); 20];
-        let script = Script::from(v);
+        let long_str = &[('a' as u8); 248];
+        let v = &[ScriptEntry::Data(long_str); 40];
+        let script = Script::build(v);
         assert_eq!(script.verify(), Ok(()));
         // script length > 10000 bytes
-        let v = vec![StackEntry::Bytes("a".repeat(500).as_bytes().to_vec()); 21];
-        let script = Script::from(v);
-        assert_eq!(script.verify(), Err(ScriptError::MaxScriptSize(21 * 500)));
+        let v = &([
+            (&[ScriptEntry::Data(long_str); 40]) as &[ScriptEntry],
+            (&[ScriptEntry::Op(OpCodes::OP_NOP)]) as &[ScriptEntry],
+        ].concat());
+        let script = Script::build(v);
+        assert_eq!(script.verify(), Err(ScriptError::MaxScriptSize(10001)));
+        // # pushes <= 201
+        let v = &[ScriptEntry::Int(1); MAX_OPS_PER_SCRIPT as usize];
+        let script = Script::build(v);
+        assert_eq!(script.verify(), Ok(()));
+        // # pushes > 201
+        let v = &[ScriptEntry::Int(1); (MAX_OPS_PER_SCRIPT + 1) as usize];
+        let script = Script::build(v);
+        assert_eq!(script.verify(), Ok(()));
         // # opcodes <= 201
-        let v = vec![StackEntry::Op(OpCodes::OP_1); MAX_OPS_PER_SCRIPT as usize];
-        let script = Script::from(v);
+        let v = &[ScriptEntry::Op(OpCodes::OP_NOP); MAX_OPS_PER_SCRIPT as usize];
+        let script = Script::build(v);
         assert_eq!(script.verify(), Ok(()));
         // # opcodes > 201
-        let v = vec![StackEntry::Op(OpCodes::OP_1); (MAX_OPS_PER_SCRIPT + 1) as usize];
-        let script = Script::from(v);
+        let v = &[ScriptEntry::Op(OpCodes::OP_NOP); (MAX_OPS_PER_SCRIPT + 1) as usize];
+        let script = Script::build(v);
         assert_eq!(script.verify(), Err(ScriptError::MaxScriptOps((MAX_OPS_PER_SCRIPT + 1) as usize)));
     }
 
@@ -2428,239 +2456,251 @@ mod tests {
     #[test]
     fn test_interpret_script() {
         // empty script
-        let v = vec![];
-        let script = Script::from(v);
+        let v = &[];
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Err(ScriptError::EndStackDepth(0)));
         // OP_0
-        let v = vec![StackEntry::Op(OpCodes::OP_0)];
-        let script = Script::from(v);
+        let v = &[ScriptEntry::Int(0)];
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Err(ScriptError::LastEntryIsZero));
         // OP_1
-        let v = vec![StackEntry::Op(OpCodes::OP_1)];
-        let script = Script::from(v);
+        let v = &[ScriptEntry::Int(1)];
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Ok(()));
         // OP_1 OP_2 OP_ADD OP_3 OP_EQUAL
-        let v = vec![
-            StackEntry::Op(OpCodes::OP_1),
-            StackEntry::Op(OpCodes::OP_2),
-            StackEntry::Op(OpCodes::OP_ADD),
-            StackEntry::Op(OpCodes::OP_3),
-            StackEntry::Op(OpCodes::OP_EQUAL),
+        let v = &[
+            ScriptEntry::Int(1),
+            ScriptEntry::Int(2),
+            ScriptEntry::Op(OpCodes::OP_ADD),
+            ScriptEntry::Int(3),
+            ScriptEntry::Op(OpCodes::OP_EQUAL),
         ];
-        let script = Script::from(v);
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Ok(()));
         // script length <= 10000 bytes
-        let v = vec![StackEntry::Bytes("a".repeat(500).as_bytes().to_vec()); 20];
-        let script = Script::from(v);
-        assert_eq!(script.interpret_full(), Err(ScriptError::EndStackDepth(20)));
+        let long_str = &[('a' as u8); 248];
+        let v = &[ScriptEntry::Data(long_str); 40];
+        let script = Script::build(v);
+        assert_eq!(script.interpret_full(), Err(ScriptError::EndStackDepth(40)));
         // script length > 10000 bytes
-        let v = vec![StackEntry::Bytes("a".repeat(500).as_bytes().to_vec()); 21];
-        let script = Script::from(v);
-        assert_eq!(script.interpret_full(), Err(ScriptError::MaxScriptSize(500 * 21)));
-        // # opcodes <= 201
-        let v = vec![StackEntry::Op(OpCodes::OP_1); MAX_OPS_PER_SCRIPT as usize];
-        let script = Script::from(v);
+        let v = &([
+            (&[ScriptEntry::Data(long_str); 40]) as &[ScriptEntry],
+            (&[ScriptEntry::Op(OpCodes::OP_NOP)]) as &[ScriptEntry],
+        ].concat());
+        let script = Script::build(v);
+        assert_eq!(script.interpret_full(), Err(ScriptError::MaxScriptSize(10001)));
+        // # pushes <= 201
+        let v = &[ScriptEntry::Int(1); MAX_OPS_PER_SCRIPT as usize];
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Err(ScriptError::EndStackDepth(MAX_OPS_PER_SCRIPT as usize)));
+        // # pushes > 201
+        let v = &[ScriptEntry::Int(1); (MAX_OPS_PER_SCRIPT + 1) as usize];
+        let script = Script::build(v);
+        assert_eq!(script.interpret_full(), Err(ScriptError::EndStackDepth((MAX_OPS_PER_SCRIPT + 1) as usize)));
+        // # opcodes <= 201
+        let v = &[ScriptEntry::Op(OpCodes::OP_NOP); MAX_OPS_PER_SCRIPT as usize];
+        let script = Script::build(v);
+        assert_eq!(script.interpret_full(), Err(ScriptError::EndStackDepth(0)));
         // # opcodes > 201
-        let v = vec![StackEntry::Op(OpCodes::OP_1); (MAX_OPS_PER_SCRIPT + 1) as usize];
-        let script = Script::from(v);
+        let v = &[ScriptEntry::Op(OpCodes::OP_NOP); (MAX_OPS_PER_SCRIPT + 1) as usize];
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Err(ScriptError::MaxScriptOps((MAX_OPS_PER_SCRIPT + 1) as usize)));
         // # items on interpreter stack <= 1000
-        let v = vec![StackEntry::Num(1); MAX_STACK_SIZE as usize];
-        let script = Script::from(v);
+        let v = &[ScriptEntry::Int(1); MAX_STACK_SIZE as usize];
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Err(ScriptError::EndStackDepth(MAX_STACK_SIZE as usize)));
         // # items on interpreter stack > 1000
-        let v = vec![StackEntry::Num(1); (MAX_STACK_SIZE + 1) as usize];
-        let script = Script::from(v);
+        let v = &[ScriptEntry::Int(1); (MAX_STACK_SIZE + 1) as usize];
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Err(ScriptError::StackFull));
     }
 
     #[test]
     fn test_conditionals() {
         // OP_1 OP_IF OP_2 OP_ELSE OP_3 OP_ELSE OP_0 OP_ENDIF
-        let v = vec![
-            StackEntry::Op(OpCodes::OP_1),
-            StackEntry::Op(OpCodes::OP_IF),
-            StackEntry::Op(OpCodes::OP_2),
-            StackEntry::Op(OpCodes::OP_ELSE),
-            StackEntry::Op(OpCodes::OP_3),
-            StackEntry::Op(OpCodes::OP_ELSE),
-            StackEntry::Op(OpCodes::OP_0),
-            StackEntry::Op(OpCodes::OP_ENDIF),
+        let v = &[
+            ScriptEntry::Int(1),
+            ScriptEntry::Op(OpCodes::OP_IF),
+            ScriptEntry::Int(2),
+            ScriptEntry::Op(OpCodes::OP_ELSE),
+            ScriptEntry::Int(3),
+            ScriptEntry::Op(OpCodes::OP_ELSE),
+            ScriptEntry::Int(0),
+            ScriptEntry::Op(OpCodes::OP_ENDIF),
         ];
-        let script = Script::from(v);
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Err(ScriptError::DuplicateElse));
         // OP_1 OP_IF OP_2 OP_ELSE OP_3 OP_ENDIF
-        let v = vec![
-            StackEntry::Op(OpCodes::OP_1),
-            StackEntry::Op(OpCodes::OP_IF),
-            StackEntry::Op(OpCodes::OP_2),
-            StackEntry::Op(OpCodes::OP_ELSE),
-            StackEntry::Op(OpCodes::OP_3),
-            StackEntry::Op(OpCodes::OP_ENDIF),
+        let v = &[
+            ScriptEntry::Int(1),
+            ScriptEntry::Op(OpCodes::OP_IF),
+            ScriptEntry::Int(2),
+            ScriptEntry::Op(OpCodes::OP_ELSE),
+            ScriptEntry::Int(3),
+            ScriptEntry::Op(OpCodes::OP_ENDIF),
         ];
-        let script = Script::from(v);
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Ok(()));
         // OP_1 OP_IF OP_0 OP_ELSE OP_3 OP_ENDIF
-        let v = vec![
-            StackEntry::Op(OpCodes::OP_1),
-            StackEntry::Op(OpCodes::OP_IF),
-            StackEntry::Op(OpCodes::OP_0),
-            StackEntry::Op(OpCodes::OP_ELSE),
-            StackEntry::Op(OpCodes::OP_3),
-            StackEntry::Op(OpCodes::OP_ENDIF),
+        let v = &[
+            ScriptEntry::Int(1),
+            ScriptEntry::Op(OpCodes::OP_IF),
+            ScriptEntry::Int(0),
+            ScriptEntry::Op(OpCodes::OP_ELSE),
+            ScriptEntry::Int(3),
+            ScriptEntry::Op(OpCodes::OP_ENDIF),
         ];
-        let script = Script::from(v);
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Err(ScriptError::LastEntryIsZero));
         // OP_0 OP_IF OP_2 OP_ELSE OP_3 OP_ENDIF
-        let v = vec![
-            StackEntry::Op(OpCodes::OP_0),
-            StackEntry::Op(OpCodes::OP_IF),
-            StackEntry::Op(OpCodes::OP_2),
-            StackEntry::Op(OpCodes::OP_ELSE),
-            StackEntry::Op(OpCodes::OP_3),
-            StackEntry::Op(OpCodes::OP_ENDIF),
+        let v = &[
+            ScriptEntry::Int(0),
+            ScriptEntry::Op(OpCodes::OP_IF),
+            ScriptEntry::Int(2),
+            ScriptEntry::Op(OpCodes::OP_ELSE),
+            ScriptEntry::Int(3),
+            ScriptEntry::Op(OpCodes::OP_ENDIF),
         ];
-        let script = Script::from(v);
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Ok(()));
         // OP_0 OP_IF OP_2 OP_ELSE OP_0 OP_ENDIF
-        let v = vec![
-            StackEntry::Op(OpCodes::OP_0),
-            StackEntry::Op(OpCodes::OP_IF),
-            StackEntry::Op(OpCodes::OP_2),
-            StackEntry::Op(OpCodes::OP_ELSE),
-            StackEntry::Op(OpCodes::OP_0),
-            StackEntry::Op(OpCodes::OP_ENDIF),
+        let v = &[
+            ScriptEntry::Int(0),
+            ScriptEntry::Op(OpCodes::OP_IF),
+            ScriptEntry::Int(2),
+            ScriptEntry::Op(OpCodes::OP_ELSE),
+            ScriptEntry::Int(0),
+            ScriptEntry::Op(OpCodes::OP_ENDIF),
         ];
-        let script = Script::from(v);
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Err(ScriptError::LastEntryIsZero));
         // OP_0 OP_NOTIF OP_2 OP_ELSE OP_0 OP_ENDIF
-        let v = vec![
-            StackEntry::Op(OpCodes::OP_0),
-            StackEntry::Op(OpCodes::OP_NOTIF),
-            StackEntry::Op(OpCodes::OP_2),
-            StackEntry::Op(OpCodes::OP_ELSE),
-            StackEntry::Op(OpCodes::OP_0),
-            StackEntry::Op(OpCodes::OP_ENDIF),
+        let v = &[
+            ScriptEntry::Int(0),
+            ScriptEntry::Op(OpCodes::OP_NOTIF),
+            ScriptEntry::Int(2),
+            ScriptEntry::Op(OpCodes::OP_ELSE),
+            ScriptEntry::Int(0),
+            ScriptEntry::Op(OpCodes::OP_ENDIF),
         ];
-        let script = Script::from(v);
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Ok(()));
         // OP_0 OP_IF OP_2 OP_ENDIF
-        let v = vec![
-            StackEntry::Op(OpCodes::OP_1),
-            StackEntry::Op(OpCodes::OP_IF),
-            StackEntry::Op(OpCodes::OP_0),
-            StackEntry::Op(OpCodes::OP_ENDIF),
+        let v = &[
+            ScriptEntry::Int(1),
+            ScriptEntry::Op(OpCodes::OP_IF),
+            ScriptEntry::Int(0),
+            ScriptEntry::Op(OpCodes::OP_ENDIF),
         ];
-        let script = Script::from(v);
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Err(ScriptError::LastEntryIsZero));
         // OP_1 OP_IF OP_2 OP_IF OP_3 OP_ELSE OP_0 OP_ENDIF OP_ENDIF
-        let v = vec![
-            StackEntry::Op(OpCodes::OP_1),
-            StackEntry::Op(OpCodes::OP_IF),
-            StackEntry::Op(OpCodes::OP_2),
-            StackEntry::Op(OpCodes::OP_IF),
-            StackEntry::Op(OpCodes::OP_3),
-            StackEntry::Op(OpCodes::OP_ELSE),
-            StackEntry::Op(OpCodes::OP_0),
-            StackEntry::Op(OpCodes::OP_ENDIF),
-            StackEntry::Op(OpCodes::OP_ENDIF),
+        let v = &[
+            ScriptEntry::Int(1),
+            ScriptEntry::Op(OpCodes::OP_IF),
+            ScriptEntry::Int(2),
+            ScriptEntry::Op(OpCodes::OP_IF),
+            ScriptEntry::Int(3),
+            ScriptEntry::Op(OpCodes::OP_ELSE),
+            ScriptEntry::Int(0),
+            ScriptEntry::Op(OpCodes::OP_ENDIF),
+            ScriptEntry::Op(OpCodes::OP_ENDIF),
         ];
-        let script = Script::from(v);
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Ok(()));
         // OP_1 OP_IF OP_0 OP_IF OP_3 OP_ELSE OP_0 OP_ENDIF OP_ENDIF
-        let v = vec![
-            StackEntry::Op(OpCodes::OP_1),
-            StackEntry::Op(OpCodes::OP_IF),
-            StackEntry::Op(OpCodes::OP_0),
-            StackEntry::Op(OpCodes::OP_IF),
-            StackEntry::Op(OpCodes::OP_3),
-            StackEntry::Op(OpCodes::OP_ELSE),
-            StackEntry::Op(OpCodes::OP_0),
-            StackEntry::Op(OpCodes::OP_ENDIF),
-            StackEntry::Op(OpCodes::OP_ENDIF),
+        let v = &[
+            ScriptEntry::Int(1),
+            ScriptEntry::Op(OpCodes::OP_IF),
+            ScriptEntry::Int(0),
+            ScriptEntry::Op(OpCodes::OP_IF),
+            ScriptEntry::Int(3),
+            ScriptEntry::Op(OpCodes::OP_ELSE),
+            ScriptEntry::Int(0),
+            ScriptEntry::Op(OpCodes::OP_ENDIF),
+            ScriptEntry::Op(OpCodes::OP_ENDIF),
         ];
-        let script = Script::from(v);
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Err(ScriptError::LastEntryIsZero));
         // OP_0 OP_IF OP_2 OP_IF OP_3 OP_ELSE OP_4 OP_ENDIF OP_ELSE OP_0 OP_ENDIF
-        let v = vec![
-            StackEntry::Op(OpCodes::OP_0),
-            StackEntry::Op(OpCodes::OP_IF),
-            StackEntry::Op(OpCodes::OP_2),
-            StackEntry::Op(OpCodes::OP_IF),
-            StackEntry::Op(OpCodes::OP_3),
-            StackEntry::Op(OpCodes::OP_ELSE),
-            StackEntry::Op(OpCodes::OP_4),
-            StackEntry::Op(OpCodes::OP_ENDIF),
-            StackEntry::Op(OpCodes::OP_ELSE),
-            StackEntry::Op(OpCodes::OP_0),
-            StackEntry::Op(OpCodes::OP_ENDIF),
+        let v = &[
+            ScriptEntry::Int(0),
+            ScriptEntry::Op(OpCodes::OP_IF),
+            ScriptEntry::Int(2),
+            ScriptEntry::Op(OpCodes::OP_IF),
+            ScriptEntry::Int(3),
+            ScriptEntry::Op(OpCodes::OP_ELSE),
+            ScriptEntry::Int(4),
+            ScriptEntry::Op(OpCodes::OP_ENDIF),
+            ScriptEntry::Op(OpCodes::OP_ELSE),
+            ScriptEntry::Int(0),
+            ScriptEntry::Op(OpCodes::OP_ENDIF),
         ];
-        let script = Script::from(v);
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Err(ScriptError::LastEntryIsZero));
         // OP_1 OP_IF OP_1
-        let v = vec![
-            StackEntry::Op(OpCodes::OP_1),
-            StackEntry::Op(OpCodes::OP_IF),
-            StackEntry::Op(OpCodes::OP_1),
+        let v = &[
+            ScriptEntry::Int(1),
+            ScriptEntry::Op(OpCodes::OP_IF),
+            ScriptEntry::Int(1),
         ];
-        let script = Script::from(v);
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Err(ScriptError::NotEmptyCondition));
         // OP_1 OP_IF OP_1 OP_ELSE OP_3
-        let v = vec![
-            StackEntry::Op(OpCodes::OP_1),
-            StackEntry::Op(OpCodes::OP_IF),
-            StackEntry::Op(OpCodes::OP_1),
-            StackEntry::Op(OpCodes::OP_ELSE),
-            StackEntry::Op(OpCodes::OP_3),
+        let v = &[
+            ScriptEntry::Int(1),
+            ScriptEntry::Op(OpCodes::OP_IF),
+            ScriptEntry::Int(1),
+            ScriptEntry::Op(OpCodes::OP_ELSE),
+            ScriptEntry::Int(3),
         ];
-        let script = Script::from(v);
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Err(ScriptError::NotEmptyCondition));
         // OP_2 OP_ELSE OP_3 OP_ENDIF
-        let v = vec![
-            StackEntry::Op(OpCodes::OP_2),
-            StackEntry::Op(OpCodes::OP_ELSE),
-            StackEntry::Op(OpCodes::OP_3),
-            StackEntry::Op(OpCodes::OP_ENDIF),
+        let v = &[
+            ScriptEntry::Int(2),
+            ScriptEntry::Op(OpCodes::OP_ELSE),
+            ScriptEntry::Int(3),
+            ScriptEntry::Op(OpCodes::OP_ENDIF),
         ];
-        let script = Script::from(v);
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Err(ScriptError::EmptyCondition));
         // OP_0 OP_IF
-        let v = vec![
-            StackEntry::Op(OpCodes::OP_0),
-            StackEntry::Op(OpCodes::OP_IF),
+        let v = &[
+            ScriptEntry::Int(0),
+            ScriptEntry::Op(OpCodes::OP_IF),
         ];
-        let script = Script::from(v);
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Err(ScriptError::NotEmptyCondition));
         // OP_IF
-        let v = vec![StackEntry::Op(OpCodes::OP_IF)];
-        let script = Script::from(v);
+        let v = &[ScriptEntry::Op(OpCodes::OP_IF)];
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Err(ScriptError::StackEmpty));
         // OP_0 OP_NOTIF
-        let v = vec![
-            StackEntry::Op(OpCodes::OP_0),
-            StackEntry::Op(OpCodes::OP_NOTIF),
+        let v = &[
+            ScriptEntry::Int(0),
+            ScriptEntry::Op(OpCodes::OP_NOTIF),
         ];
-        let script = Script::from(v);
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Err(ScriptError::NotEmptyCondition));
         // OP_NOTIF
-        let v = vec![StackEntry::Op(OpCodes::OP_NOTIF)];
-        let script = Script::from(v);
+        let v = &[ScriptEntry::Op(OpCodes::OP_NOTIF)];
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Err(ScriptError::StackEmpty));
         // OP_ELSE
-        let v = vec![StackEntry::Op(OpCodes::OP_ELSE)];
-        let script = Script::from(v);
+        let v = &[ScriptEntry::Op(OpCodes::OP_ELSE)];
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Err(ScriptError::EmptyCondition));
         // OP_ENDIF
-        let v = vec![StackEntry::Op(OpCodes::OP_ENDIF)];
-        let script = Script::from(v);
+        let v = &[ScriptEntry::Op(OpCodes::OP_ENDIF)];
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Err(ScriptError::EmptyCondition));
     }
 
     #[test]
     fn test_burn_script() {
-        let v = vec![StackEntry::Op(OpCodes::OP_BURN)];
-        let script = Script::from(v);
+        let v = &[ScriptEntry::Op(OpCodes::OP_BURN)];
+        let script = Script::build(v);
         assert_eq!(script.interpret_full(), Err(ScriptError::Burn));
     }
 
@@ -2712,7 +2752,8 @@ mod tests {
         let signature = sign::sign_detached(asset_hash.as_bytes(), &sk);
 
         let script = Script::new_create_asset(0, asset_hash, signature, pk);
-        assert!(tx_has_valid_create_script(&script, &asset));
+        assert!(tx_has_valid_create_script(&script, &asset),
+                "invalid create script: {:?}", script);
     }
 
     #[test]
@@ -2725,7 +2766,8 @@ mod tests {
         let signature = sign::sign_detached(asset_hash.as_bytes(), &sk);
 
         let script = Script::new_create_asset(0, asset_hash, signature, pk);
-        assert!(!tx_has_valid_create_script(&script, &asset));
+        assert!(!tx_has_valid_create_script(&script, &asset),
+                "invalid create asset script: {:?}", script);
     }
 
     #[test]
@@ -2883,11 +2925,17 @@ mod tests {
 
         for entry in [tx_const] {
             let mut new_tx_in = TxIn::new();
-            new_tx_in.script_signature = Script::new();
+            // TODO: jrabil: re-do this before merge
+            new_tx_in.script_signature = Script::pay2pkh(
+                Vec::new(),
+                signature.clone(),
+                pk.clone(),
+            );
+            /*new_tx_in.script_signature = Script::new();
             new_tx_in
                 .script_signature
                 .stack
-                .push(StackEntry::Bytes("".as_bytes().to_vec()));
+                .push(StackEntry::Bytes("".as_bytes().to_vec()));*/
             new_tx_in.previous_out = Some(entry.previous_out);
 
             tx_ins.push(new_tx_in);
@@ -2922,32 +2970,32 @@ mod tests {
 
         let tx_ins = create_multisig_tx_ins(vec![tx_const], m);
 
-        assert_eq!(tx_ins[0].clone().script_signature.interpret_full(), Ok(()));
+        assert_eq!(tx_ins[0].clone().script_signature.interpret_full(), Ok(()),
+                   "multisig script_signature invalid: {:?}", tx_ins[0].script_signature);
     }
 
     #[test]
     /// Validate tx_is_valid for multiple TxIn configurations
     fn test_tx_is_valid() {
-        test_tx_is_valid_common(OpCodes::OP_HASH256, None, false);
+        test_tx_is_valid_common(None, false);
     }
 
     #[test]
     /// Validate tx_is_valid for locktime
     fn test_tx_is_valid_locktime() {
         assert!(
-            test_tx_is_valid_common(OpCodes::OP_HASH256, Some(99), false)
-                && !test_tx_is_valid_common(OpCodes::OP_HASH256, Some(1000000000), false)
+            test_tx_is_valid_common(Some(99), false)
+                && !test_tx_is_valid_common(Some(1000000000), false)
         );
     }
 
     #[test]
     /// Validate tx_is_valid for fees
     fn test_tx_is_valid_fees() {
-        test_tx_is_valid_common(OpCodes::OP_HASH256, None, true);
+        test_tx_is_valid_common(None, true);
     }
 
     fn test_tx_is_valid_common(
-        op_hash256: OpCodes,
         locktime: Option<u64>,
         with_fees: bool,
     ) -> bool {
@@ -2969,23 +3017,23 @@ mod tests {
         let valid_sig = sign::sign_detached(valid_bytes.as_bytes(), &sk);
 
         // Test cases:
-        let inputs = vec![
+        let inputs = [
             // 0. Happy case: valid test
             (
-                vec![
-                    StackEntry::Bytes(hex::decode(valid_bytes).unwrap()),
-                    StackEntry::Signature(valid_sig),
-                    StackEntry::PubKey(pk),
-                    StackEntry::Op(OpCodes::OP_DUP),
-                    StackEntry::Op(op_hash256),
-                    StackEntry::Bytes(hex::decode(script_public_key).unwrap()),
-                    StackEntry::Op(OpCodes::OP_EQUALVERIFY),
-                    StackEntry::Op(OpCodes::OP_CHECKSIG),
-                ],
+                Script::build(&[
+                    ScriptEntry::Data(&hex::decode(valid_bytes).unwrap()),
+                    ScriptEntry::Data(valid_sig.as_ref()),
+                    ScriptEntry::Data(pk.as_ref()),
+                    ScriptEntry::Op(OpCodes::OP_DUP),
+                    ScriptEntry::Op(OpCodes::OP_HASH256),
+                    ScriptEntry::Data(&hex::decode(script_public_key).unwrap()),
+                    ScriptEntry::Op(OpCodes::OP_EQUALVERIFY),
+                    ScriptEntry::Op(OpCodes::OP_CHECKSIG),
+                ]),
                 true,
             ),
             // 2. Empty script
-            (vec![StackEntry::Bytes("".as_bytes().to_vec())], false),
+            (Script::build(&[ScriptEntry::Data(&[])]), false),
         ];
 
         //
@@ -2994,9 +3042,7 @@ mod tests {
         let mut actual_result = Vec::new();
         for (script, _) in &inputs {
             let tx_ins = vec![TxIn {
-                script_signature: Script {
-                    stack: script.clone(),
-                },
+                script_signature: script.clone(),
                 previous_out: Some(tx_outpoint.clone()),
             }];
 

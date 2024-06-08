@@ -5,10 +5,11 @@ use crate::primitives::asset::Asset;
 use crate::primitives::druid::{DdeValues, DruidExpectation};
 use crate::primitives::transaction::*;
 use crate::script::lang::Script;
-use crate::script::{OpCodes, StackEntry};
+use crate::script::{OpCodes, ScriptEntry, StackEntry};
 use std::collections::BTreeMap;
 use tracing::debug;
 use crate::primitives::format;
+use crate::utils::script_utils::{match_v6_script, MatchV6Script};
 
 pub struct ReceiverInfo {
     pub address: String,
@@ -96,23 +97,6 @@ pub fn construct_tx_in_signable_asset_hash(asset: &Asset) -> String {
     ))
 }
 
-/// Constructs signable string for a StackEntry
-///
-/// ### Arguments
-///
-/// * `entry`   - StackEntry to obtain signable string for
-pub fn get_stack_entry_signable_string(entry: &StackEntry) -> String {
-    match entry {
-        StackEntry::Op(op) => format!("Op:{op}"),
-        StackEntry::Signature(signature) => {
-            format!("Signature:{}", hex::encode(signature.as_ref()))
-        }
-        StackEntry::PubKey(pub_key) => format!("PubKey:{}", hex::encode(pub_key.as_ref())),
-        StackEntry::Num(num) => format!("Num:{num}"),
-        StackEntry::Bytes(bytes) => format!("Bytes:{}", hex::encode(bytes)),
-    }
-}
-
 /// Constructs signable string from both TxIns and TxOuts
 ///
 /// ### Arguments
@@ -141,17 +125,56 @@ pub fn construct_tx_in_out_signable_hash(tx_in: &TxIn, tx_out: &[TxOut]) -> Stri
     hex::encode(sha3_256::digest(signable.as_bytes()))
 }
 
+/// Constructs signable string for a StackEntry
+///
+/// ### Arguments
+///
+/// * `entry`   - StackEntry to obtain signable string for
+#[deprecated = "This should only be used for v6 scripts; it will be removed in the future"]
+fn get_stack_entry_signable_string(entry: &StackEntry) -> String {
+    match entry {
+        StackEntry::Op(op) => format!("Op:{op}"),
+        StackEntry::Signature(signature) => {
+            format!("Signature:{}", hex::encode(signature.as_ref()))
+        }
+        StackEntry::PubKey(pub_key) => format!("PubKey:{}", hex::encode(pub_key.as_ref())),
+        StackEntry::Num(num) => format!("Num:{num}"),
+        StackEntry::Bytes(bytes) => format!("Bytes:{}", hex::encode(bytes)),
+    }
+}
+
 /// Constructs signable string for Script stack
 ///
 /// ### Arguments
 ///
 /// * `stack`   - StackEntry vector
-pub fn get_script_signable_string(stack: &[StackEntry]) -> String {
+#[deprecated = "This should only be used for v6 scripts; it will be removed in the future"]
+fn get_script_signable_string(stack: &[StackEntry]) -> String {
     stack
         .iter()
         .map(get_stack_entry_signable_string)
         .collect::<Vec<String>>()
         .join("-")
+}
+
+fn get_v6_script_signable_string(script: &Script) -> String {
+    match match_v6_script(script).expect("unknown or unsupported v6 script") {
+        MatchV6Script::Coinbase { block_number } =>
+            format!("Num:{}",
+                    block_number),
+        MatchV6Script::Create { block_number, asset_hash, signature, public_key } =>
+            format!("Op:OP_CREATE-Num:{}-Op:OP_DROP-Bytes:{}-Signature:{}-PubKey:{}-Op:OP_CHECKSIG",
+                    block_number,
+                    hex::encode(asset_hash),
+                    hex::encode(signature.as_ref()),
+                    hex::encode(public_key.as_ref())),
+        MatchV6Script::P2PKH { check_data, signature, public_key, public_key_hash } =>
+            format!("Bytes:{}-Signature:{}-PubKey:{}-Op:OP_DUP-Op:OP_HASH256-Bytes:{}-Op:OP_EQUALVERIFY-Op:OP_CHECKSIG",
+                    hex::encode(check_data),
+                    hex::encode(signature.as_ref()),
+                    hex::encode(public_key.as_ref()),
+                    hex::encode(public_key_hash)),
+    }
 }
 
 /// Constructs signable string for TxIn
@@ -164,7 +187,8 @@ pub fn get_tx_in_address_signable_string(tx_in: &TxIn) -> String {
         Some(out_point) => get_out_point_signable_string(out_point),
         None => "null".to_owned(),
     };
-    let script_signable_string = get_script_signable_string(&tx_in.script_signature.stack);
+    // TODO: this needs to handle different transaction versions differently
+    let script_signable_string = get_v6_script_signable_string(&tx_in.script_signature);
     debug!("Formatted string: {out_point_signable_string}-{script_signable_string}");
     format!("{out_point_signable_string}-{script_signable_string}")
 }
@@ -422,8 +446,7 @@ pub fn construct_p2sh_tx(
 ///
 /// * `tx_ins`  - Input/s to pay from
 pub fn construct_burn_tx(tx_ins: Vec<TxIn>, fee: Option<ReceiverInfo>, key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>) -> Transaction {
-    let s = vec![StackEntry::Op(OpCodes::OP_BURN)];
-    let script = Script::from(s);
+    let script = Script::build(&[ScriptEntry::Op(OpCodes::OP_BURN)]);
     let script_hash = construct_p2sh_address(&script);
 
     let tx_out = TxOut {
@@ -713,9 +736,11 @@ mod tests {
     fn test_construct_a_valid_p2sh_tx() {
         let token_amount = TokenAmount(400000);
         let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs();
-        let mut script = Script::new_for_coinbase(10);
-        script.stack.push(StackEntry::Op(OpCodes::OP_DROP));
-        script.stack.push(StackEntry::Op(OpCodes::OP_1));
+        let script = Script::build(&[
+            ScriptEntry::Int(10),
+            ScriptEntry::Op(OpCodes::OP_DROP),
+            ScriptEntry::Int(1),
+        ]);
 
         let p2sh_tx = construct_p2sh_tx(tx_ins, None, &script, Asset::Token(token_amount), 0, &key_material);
 
@@ -766,8 +791,7 @@ mod tests {
             pub_keys: vec![],
         };
 
-        let s = vec![StackEntry::Op(OpCodes::OP_BURN)];
-        let script = Script::from(s);
+        let script = Script::build(&[ScriptEntry::Op(OpCodes::OP_BURN)]);
 
         let redeeming_tx_ins = construct_p2sh_redeem_tx_ins(tx_const, script);
         let redeeming_tx = construct_payment_tx(
@@ -1016,12 +1040,16 @@ mod tests {
             pub_keys: vec![pk],
         };
         let tx_ins_2 = construct_payment_tx_ins(vec![tx_2]);
-        let tx_outs = vec![TxOut::new_token_amount(
-            hex::encode(vec![0; 32]),
-            token_amount,
+        let payment_tx_2 = construct_payment_tx(
+            tx_ins_2,
+            ReceiverInfo {
+                address: hex::encode(&[0u8; 32]),
+                asset: Asset::Token(token_amount),
+            },
             None,
-        )];
-        let payment_tx_2 = construct_tx_core(tx_ins_2, tx_outs, None);
+            0,
+            &key_material,
+        );
 
         let tx_2_hash = construct_tx_hash(&payment_tx_2);
         let tx_2_out_p = OutPoint::new_from_hash(tx_2_hash.parse().unwrap(), 0);
@@ -1068,6 +1096,7 @@ mod tests {
             script_public_key: Some(to_asset.clone()),
             ..Default::default()
         }];
+        let tx_ins = update_input_signatures(&tx_ins, &tx_outs, &key_material);
 
         let from_addr = construct_tx_ins_address(&tx_ins);
 

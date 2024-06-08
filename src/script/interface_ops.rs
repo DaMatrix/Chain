@@ -1093,7 +1093,7 @@ pub fn op_checkmultisig(stack: &mut Stack) -> Result<(), ScriptError> {
     }
     let mut pks = Vec::with_capacity(n);
     for i in 0..n {
-        if let Ok(StackEntry::PubKey(pk)) = stack.pop() {
+        if let Ok(pk) = pop_pubkey(stack) {
             pks.push(pk);
         }
     }
@@ -1106,7 +1106,7 @@ pub fn op_checkmultisig(stack: &mut Stack) -> Result<(), ScriptError> {
     }
     let mut sigs = Vec::with_capacity(m);
     for i in 0..m {
-        if let Ok(StackEntry::Signature(sig)) = stack.pop() {
+        if let Ok(sig) = pop_sig(stack) {
             sigs.push(sig);
         }
     }
@@ -1192,6 +1192,7 @@ fn pop_bytes(stack: &mut Stack) -> Result<Vec<u8>, ScriptError> {
 fn pop_pubkey(stack: &mut Stack) -> Result<PublicKey, ScriptError> {
     match stack.pop()? {
         StackEntry::PubKey(pubkey) => Ok(pubkey),
+        StackEntry::Bytes(bytes) => PublicKey::from_slice(bytes.as_ref()).ok_or(ScriptError::ItemType),
         _ => return Err(ScriptError::ItemType),
     }
 }
@@ -1204,6 +1205,7 @@ fn pop_pubkey(stack: &mut Stack) -> Result<PublicKey, ScriptError> {
 fn pop_sig(stack: &mut Stack) -> Result<Signature, ScriptError> {
     match stack.pop()? {
         StackEntry::Signature(sig) => Ok(sig),
+        StackEntry::Bytes(bytes) => Signature::from_slice(bytes.as_ref()).ok_or(ScriptError::ItemType),
         _ => return Err(ScriptError::ItemType),
     }
 }
@@ -1213,9 +1215,9 @@ fn pop_sig(stack: &mut Stack) -> Result<Signature, ScriptError> {
 /// ### Arguments
 ///
 /// * `stack` - a reference to the stack
-fn peek_bytes(stack: &Stack) -> Result<&Vec<u8>, ScriptError> {
+fn peek_bytes(stack: &Stack) -> Result<&[u8], ScriptError> {
     match stack.peek()? {
-        StackEntry::Bytes(b) => Ok(b),
+        StackEntry::Bytes(b) => Ok(b.as_ref()),
         _ => return Err(ScriptError::ItemType),
     }
 }

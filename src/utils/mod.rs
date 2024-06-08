@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::convert::TryInto;
 
 use crate::constants::{D_DISPLAY_PLACES, TOTAL_TOKENS};
 use crate::primitives::asset::TokenAmount;
@@ -50,6 +51,24 @@ pub fn add_btreemap<E: Ord, T: Copy + std::ops::AddAssign>(
         m1.entry(key).and_modify(|e| *e += value).or_insert(value);
     });
     m1
+}
+
+/// Allows pattern matching a slice with a constant length array.
+///
+/// ### Arguments
+///
+/// * `slice` - the slice to match
+pub fn array_match_slice<T, const N: usize>(slice: &[T]) -> Option<&[T; N]> {
+    slice.try_into().ok()
+}
+
+/// Allows pattern matching a slice with a constant length array.
+///
+/// ### Arguments
+///
+/// * `slice` - the slice to match
+pub fn array_match_slice_copy<T: Copy, const N: usize>(slice: &[T]) -> Option<[T; N]> {
+    slice.try_into().ok()
 }
 
 /// A trait which indicates that it is possible to acquire a "placeholder" value

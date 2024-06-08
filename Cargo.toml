@@ -19,6 +19,7 @@ base64 = "0.20.0"
 bincode = { version = "2.0.0-rc.3", features = ["serde"] }
 bytes = "1.4.0"
 colored = { version = "2.1.0", optional = true }
+fallible-iterator = "0.3.0"
 hex = "0.4.3"
 merkle-log = "0.0.4"
 rand = "0.8.5"

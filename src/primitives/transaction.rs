@@ -8,7 +8,7 @@ use crate::primitives::{
     druid::{DdeValues, DruidExpectation},
 };
 use crate::script::lang::Script;
-use crate::script::{OpCodes, StackEntry};
+use crate::script::{OpCodes, ScriptEntry, StackEntry};
 use crate::utils::{FromOrdinal, is_valid_amount, Placeholder, ToOrdinal};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
@@ -248,13 +248,11 @@ impl Default for TxIn {
 
 impl TxIn {
     /// Creates a new TxIn instance
+    #[deprecated = "TxIn should not be used in a mutable fashion"]
     pub fn new() -> TxIn {
-        let mut script_sig = Script::new();
-        script_sig.stack.push(StackEntry::Op(OpCodes::OP_0));
-
         TxIn {
             previous_out: None,
-            script_signature: script_sig,
+            script_signature: Script::build(&[ScriptEntry::Int(0)]),
         }
     }
 

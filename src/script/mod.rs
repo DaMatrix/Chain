@@ -7,14 +7,19 @@ use crate::crypto::sign_ed25519::{PublicKey, Signature};
 use crate::constants::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
-use bincode::{Decode, Encode, impl_borrow_decode};
-use bincode::de::Decoder;
+use std::fmt::{Formatter, write, Write};
+use bincode::{BorrowDecode, Decode, Encode, impl_borrow_decode};
+use bincode::de::{BorrowDecoder, Decoder};
+use bincode::de::read::BorrowReader;
 use bincode::enc::Encoder;
 use bincode::error::{AllowedEnumVariants, DecodeError, EncodeError};
 use serde::de::Unexpected;
+use crate::script::lang::Script;
+use crate::utils::{FromName, ToName, ToOrdinal};
+use crate::utils::serialize_utils::{bincode_borrow_decode_from_slice_standard, bincode_encode_to_write_standard};
 
 /// Stack entry enum
-#[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum StackEntry {
     Op(OpCodes),
     Signature(Signature),
@@ -27,101 +32,48 @@ pub enum StackEntry {
 macro_rules! opcodes_enum {
     (
         <regular_opcodes> $($regular_id:ident = $regular_num:literal; $regular_desc:literal,)*
+        <const_int_opcodes> $($const_int_id:ident($const_int_val:literal) = $const_int_num:literal,)*
+        <variable_int_opcode> $var_int_id:ident = $var_int_num:literal,
         <fixed_data_opcodes> $($fixed_data_id:ident([u8; $fixed_data_len:literal]) = $fixed_data_num:literal,)*
         <variable_data_opcode> $var_data_id:ident(Vec<u8>) = $var_data_num:literal,
     ) => {
-        #[allow(non_camel_case_types, clippy::upper_case_acronyms)]
-        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
-        #[repr(u8)]
-        pub enum OpCodes {
-            $( $regular_id = $regular_num, )*
-            $( $fixed_data_id([u8; $fixed_data_len]) = $fixed_data_num, )*
-            $var_data_id(Vec<u8>) = $var_data_num,
-        }
+        // This dummy enum simply serves as a compile-time check that none of the opcode numbers are
+        // used more than once.
+        #[doc(hidden)]
+        #[allow(non_upper_case_globals, unused_attributes, unused_qualifications)]
+        const _: () = {
+            #[allow(non_camel_case_types, clippy::upper_case_acronyms)]
+            #[repr(u8)]
+            enum AllOpCodes {
+                $( $regular_id = $regular_num, )*
+                $( $const_int_id = $const_int_num, )*
+                $var_int_id = $var_int_num,
+                $( $fixed_data_id = $fixed_data_num, )*
+                $var_data_id = $var_data_num,
+            }
+        };
+
+        make_ordinal_enum!(
+            #[allow(non_camel_case_types, clippy::upper_case_acronyms)]
+            #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+            pub enum OpCodes {
+                $( $regular_id = $regular_num, )*
+            }
+            all_variants=pub ALL_OPCODES);
 
         impl OpCodes {
-            /// This opcode's string name
-            pub fn name(&self) -> &'static str {
-                match self {
-                    $( Self::$regular_id => stringify!($regular_id), )*
-                    $( Self::$fixed_data_id(_) => stringify!($fixed_data_id), )*
-                    Self::$var_data_id(_) => stringify!($var_data_id),
-                }
-            }
-
-            /// This opcode's string name
+            /// This opcode's string description
             pub fn desc(&self) -> &'static str {
                 match self {
                     $( Self::$regular_id => $regular_desc, )*
-                    $( Self::$fixed_data_id(_) => concat!("Pushes ", stringify!($fixed_data_len), " constant bytes onto the stack"), )*
-                    Self::$var_data_id(_) => "Pushes a variable number of constant bytes onto the stack",
-                }
-            }
-
-            /// Gets an opcode which can push the given constant bytes onto the stack
-            ///
-            /// ### Arguments
-            ///
-            /// * `bytes` - a slice containing the constant bytes to push
-            pub fn to_data_opcode(bytes: &[u8]) -> Self {
-                match bytes.len() {
-                    $( $fixed_data_len => Self::$fixed_data_id(bytes.try_into().unwrap()), )*
-                    _ => Self::$var_data_id(bytes.to_vec()),
                 }
             }
         }
-
-        impl Encode for OpCodes {
-            fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-                let num : u8 = match self {
-                    $( Self::$regular_id => $regular_num, )*
-                    $( Self::$fixed_data_id(_) => $fixed_data_num, )*
-                    Self::$var_data_id(_) => $var_data_num,
-                };
-                // Sanity check because we want to leave the top few opcodes free for future
-                // expansion
-                assert!(num < 250, "opcode number too high: {}", num);
-                Encode::encode(&num, encoder)?;
-
-                match self {
-                    $( Self::$regular_id => Ok(()), )*
-                    $( Self::$fixed_data_id(data) => Encode::encode(data, encoder), )*
-                    Self::$var_data_id(data) => Encode::encode(data, encoder),
-                }
-            }
-        }
-
-        impl Decode for OpCodes {
-            fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-                let num : u8 = Decode::decode(decoder)?;
-                match num {
-                    $( $regular_num => Ok(Self::$regular_id), )*
-                    $( $fixed_data_num => Ok(Self::$fixed_data_id(Decode::decode(decoder)?)), )*
-                    $var_data_num => //TODO: validate that the data size isn't used by one of the constant opcodes
-                        Ok(Self::$var_data_id(Decode::decode(decoder)?)),
-                    _ => Err(DecodeError::UnexpectedVariant {
-                        type_name: "OpCodes",
-                        allowed: &AllowedEnumVariants::Allowed(&[
-                            $( $regular_num, )*
-                            $( $fixed_data_num, )*
-                            $var_data_num,
-                        ]),
-                        found: num as u32,
-                    }),
-                }
-            }
-        }
-        impl_borrow_decode!(OpCodes);
 
         impl Serialize for OpCodes {
             fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
                 assert!(serializer.is_human_readable(), "serializer must be human-readable!");
-
-                match self {
-                    $( Self::$regular_id => serializer.serialize_str(stringify!($regular_id)), )*
-                    $( Self::$fixed_data_id(data) => serializer.serialize_str(&hex::encode(data)), )*
-                    Self::$var_data_id(data) => serializer.serialize_str(&hex::encode(data)),
-                }
+                serializer.serialize_str(self.to_name())
             }
         }
 
@@ -129,16 +81,77 @@ macro_rules! opcodes_enum {
             fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
                 assert!(deserializer.is_human_readable(), "deserializer must be human-readable!");
 
-                let text : &str = Deserialize::deserialize(deserializer)?;
-                match text {
+                let name : &str = Deserialize::deserialize(deserializer)?;
+                match name {
                     $( stringify!($regular_id) => Ok(Self::$regular_id), )*
-                    _ => match hex::decode(text) {
-                        Ok(bytes) => match bytes.len() {
-                            $( $fixed_data_len => Ok(Self::$fixed_data_id(bytes.try_into().unwrap())), )*
-                            _ => Ok(Self::$var_data_id(bytes)),
-                        },
-                        Err(_) => Err(<D::Error as serde::de::Error>::invalid_value(Unexpected::Str(text), &"an opcode name or a hex string")),
+                    _ => Err(<D::Error as serde::de::Error>::unknown_variant(name, <Self as FromName>::ALL_NAMES)),
+                }
+            }
+        }
+
+        /// A single entry in a script. Represents either an opcode to be executed, or constant
+        /// data to be pushed on the stack.
+        #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+        pub enum ScriptEntry<'a> {
+            Op(OpCodes),
+            Int(u64),
+            Data(&'a [u8]),
+        }
+
+        impl Encode for ScriptEntry<'_> {
+            fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+                match self {
+                    Self::Op(op) => Encode::encode(&(op.to_ordinal() as u8), encoder),
+                    Self::Int(int) => match int {
+                        $( $const_int_val => Encode::encode(&($const_int_num as u8), encoder), )*
+                        _ => {
+                            Encode::encode(&($var_int_num as u8), encoder)?;
+                            Encode::encode(int, encoder)
+                        }
+                    },
+                    Self::Data(data) => match data.len() {
+                        $(
+                            // If the data length is one of the known constants, encode it without
+                            // a length prefix by using the corresponding fixed-length byte opcode
+                            $fixed_data_len => {
+                                Encode::encode(&($fixed_data_num as u8), encoder)?;
+                                let data : &[u8; $fixed_data_len] = (*data).try_into().unwrap();
+                                Encode::encode(data, encoder)
+                            }
+                        )*
+                        // Otherwise, use a length prefix.
+                        _ => {
+                            Encode::encode(&($var_data_num as u8), encoder)?;
+                            Encode::encode(data, encoder)
+                        }
                     }
+                }
+            }
+        }
+
+        impl<'de> BorrowDecode<'de> for ScriptEntry<'de> {
+            fn borrow_decode<D: BorrowDecoder<'de>>(decoder: &mut D) -> Result<Self, DecodeError> {
+                let op : u8 = Decode::decode(decoder)?;
+                match op {
+                    $( $regular_num => Ok(Self::Op(OpCodes::$regular_id)), )*
+                    $( $const_int_num => Ok(Self::Int($const_int_val)), )*
+                    $var_int_num => <u64 as Decode>::decode(decoder).map(Self::Int),
+                    $( $fixed_data_num => decoder.borrow_reader().take_bytes($fixed_data_len).map(Self::Data), )*
+                    $var_data_num => {
+                        let len : usize = Decode::decode(decoder)?;
+                        decoder.borrow_reader().take_bytes(len).map(Self::Data)
+                    }
+                    _ => Err(DecodeError::UnexpectedVariant {
+                        type_name: "ScriptEntry",
+                        allowed: &AllowedEnumVariants::Allowed(&[
+                            $( $regular_num, )*
+                            $( $const_int_num, )*
+                            $var_int_num,
+                            $( $fixed_data_num, )*
+                            $var_data_num,
+                        ]),
+                        found: op as u32,
+                    })
                 }
             }
         }
@@ -148,24 +161,6 @@ macro_rules! opcodes_enum {
 /// Opcodes enum
 opcodes_enum!(
     <regular_opcodes>
-    // constants
-    OP_0 = 0x00; "Pushes the constant 0 onto the stack",
-    OP_1 = 0x01; "Pushes the constant 1 onto the stack",
-    OP_2 = 0x02; "Pushes the constant 2 onto the stack",
-    OP_3 = 0x03; "Pushes the constant 3 onto the stack",
-    OP_4 = 0x04; "Pushes the constant 4 onto the stack",
-    OP_5 = 0x05; "Pushes the constant 5 onto the stack",
-    OP_6 = 0x06; "Pushes the constant 6 onto the stack",
-    OP_7 = 0x07; "Pushes the constant 7 onto the stack",
-    OP_8 = 0x08; "Pushes the constant 8 onto the stack",
-    OP_9 = 0x09; "Pushes the constant 9 onto the stack",
-    OP_10 = 0x0a; "Pushes the constant 10 onto the stack",
-    OP_11 = 0x0b; "Pushes the constant 11 onto the stack",
-    OP_12 = 0x0c; "Pushes the constant 12 onto the stack",
-    OP_13 = 0x0d; "Pushes the constant 13 onto the stack",
-    OP_14 = 0x0e; "Pushes the constant 14 onto the stack",
-    OP_15 = 0x0f; "Pushes the constant 15 onto the stack",
-    OP_16 = 0x10; "Pushes the constant 16 onto the stack",
     // flow control
     OP_NOP = 0x20; "Does nothing",
     OP_IF = 0x21; "Checks if the top item on the stack is not ZERO and executes the next block of instructions",
@@ -255,6 +250,28 @@ opcodes_enum!(
     OP_NOP10 = 0xb9; "",
     OP_NOP11 = 0x92; "", // Formerly OP_HASH256_V0
     OP_NOP12 = 0x93; "", // Formerly OP_HASH256_TEMP
+    // constants
+    <const_int_opcodes>
+    // TODO: would be nice to add -1, maybe (should integers be signed?)
+    OP_0(0) = 0x00,
+    OP_1(1) = 0x01,
+    OP_2(2) = 0x02,
+    OP_3(3) = 0x03,
+    OP_4(4) = 0x04,
+    OP_5(5) = 0x05,
+    OP_6(6) = 0x06,
+    OP_7(7) = 0x07,
+    OP_8(8) = 0x08,
+    OP_9(9) = 0x09,
+    OP_10(10) = 0x0a,
+    OP_11(11) = 0x0b,
+    OP_12(12) = 0x0c,
+    OP_13(13) = 0x0d,
+    OP_14(14) = 0x0e,
+    OP_15(15) = 0x0f,
+    OP_16(16) = 0x10,
+    <variable_int_opcode>
+    OP_NUM = 0x1f,
     // constant data
     <fixed_data_opcodes>
     OP_DATA1([u8; 1]) = 0xc1,
@@ -278,10 +295,30 @@ impl OpCodes {
     }
 }
 
-/// Allows for string casting
-impl fmt::Display for OpCodes {
+impl fmt::Display for ScriptEntry<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(self.name())
+        match self {
+            Self::Op(opcode) => f.write_str(opcode.to_name()),
+            // TODO: jrabil: decide how to represent these as strings before merge
+            Self::Int(int) => int.fmt(f),
+            Self::Data(data) => write!(f, "0x{}", hex::encode(*data)),
+        }
+    }
+}
+
+impl fmt::Debug for ScriptEntry<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Op(opcode) => f.debug_tuple("Op")
+                .field(opcode)
+                .finish(),
+            Self::Int(int) => f.debug_tuple("Int")
+                .field(int)
+                .finish(),
+            Self::Data(data) => f.debug_tuple("Data")
+                .field(&format!("0x{}", hex::encode(*data)))
+                .finish(),
+        }
     }
 }
 
@@ -305,6 +342,7 @@ make_error_type!(#[derive(Eq, PartialEq)] pub enum ScriptError {
     DivideByZero; "Attempt to divide by ZERO",
     InvalidSignature; "Signature is not valid",
     InvalidMultisignature; "Multi-signature is not valid",
+    // TODO: jrabil these errors are confusing, we should return the actual error type
     NumPubkeys; "Number of public keys provided is not correct",
     NumSignatures; "Number of signatures provided is not correct",
     ReservedOpcode(op: OpCodes); "Reserved opcode: {op}",
@@ -313,7 +351,9 @@ make_error_type!(#[derive(Eq, PartialEq)] pub enum ScriptError {
     LastEntryIsZero; "Last stack entry is zero",
     NotEmptyCondition; "Condition stack after script evaluation is non-empty",
     // script
+    Decode(cause: String); "Script failed to decode: {cause}",
     MaxScriptSize(size: usize); "Script size {size} exceeds {MAX_SCRIPT_SIZE}-byte limit",
     MaxScriptOps(count: usize); "Script opcode count {count} exceeds limit {MAX_OPS_PER_SCRIPT}",
     DuplicateElse; "Conditional block contains multiple OP_ELSE opcodes",
+    BadMatchCount; "Script contained the wrong number of opcodes to match",
 });

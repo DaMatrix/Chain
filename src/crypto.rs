@@ -44,7 +44,6 @@ pub mod sign_ed25519 {
     pub use ring::signature::{ED25519, ED25519_PUBLIC_KEY_LEN};
     use serde::{Deserialize, Serialize};
     use std::convert::TryInto;
-    use std::ops::Deref;
     use tracing::warn;
 
     pub type PublicKeyBase = <SecretKey as KeyPair>::PublicKey;

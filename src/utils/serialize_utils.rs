@@ -5,7 +5,7 @@ use std::io::Write;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
-use bincode::{Decode, Encode};
+use bincode::{BorrowDecode, Decode, Encode};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde::de::{SeqAccess, Visitor};
@@ -340,6 +340,21 @@ pub fn bincode_decode_from_slice_standard_full<T: Decode>(
         Err(bincode::error::DecodeError::OtherString(
             format!("{} bytes left over after decoding", slice.len() - read_bytes)))
     }
+}
+
+/// Decodes an object from a slice using bincode 2's standard configuration.
+///
+/// This allows using the turbofish operator to explicitly specify the decode type without also
+/// having to specify the config type.
+///
+/// ### Arguments
+///
+/// * `slice` - the slice to decode from
+#[inline(always)]
+pub fn bincode_borrow_decode_from_slice_standard<'a, T: BorrowDecode<'a>>(
+    slice: &'a [u8],
+) -> Result<(T, usize), bincode::error::DecodeError> {
+    bincode::borrow_decode_from_slice(slice, bincode::config::standard())
 }
 
 /*---- TESTS ----*/
