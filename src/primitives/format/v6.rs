@@ -1,4 +1,5 @@
 use std::convert::TryInto;
+use bincode::Options;
 use serde::{Deserialize, Serialize};
 use crate::crypto::sign_ed25519::{PublicKey, Signature};
 use crate::primitives::asset::{Asset, ItemAsset, TokenAmount};
@@ -225,6 +226,12 @@ enum V6OpCodes {
     OP_NOP9 = 0xb8,
     OP_NOP10 = 0xb9,
 }
+
+macro_rules! bincode_options { () => {
+    bincode::DefaultOptions::new()
+        .with_fixint_encoding()
+        .reject_trailing_bytes()
+}; }
 
 make_error_type!(pub enum FromV6Error {
     BadVersion(version: u64); "not a v6 transaction: {version}",
@@ -711,6 +718,8 @@ pub fn serialize(tx: &Transaction) -> Result<Vec<u8>, ToV6Error> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use std::collections::BTreeMap;
     use crate::constants::STANDARD_ADDRESS_LENGTH_BYTES;
     use crate::crypto::sign_ed25519;
@@ -719,6 +728,8 @@ mod tests {
     use crate::primitives::transaction::{OutPoint, Transaction, TxConstructor, TxIn, TxOut};
     use crate::utils::{script_utils, transaction_utils};
     use crate::utils::transaction_utils::ReceiverInfo;
+
+    const STANDARD_ADDRESS_LENGTH_BYTES : usize = STANDARD_ADDRESS_LENGTH / 2;
 
     fn test_construct_valid_inputs() -> (Vec<TxIn>, BTreeMap<OutPoint, (PublicKey, SecretKey)>) {
         let (_pk, sk) = sign_ed25519::gen_test_keypair(0).unwrap();
@@ -733,6 +744,7 @@ mod tests {
             previous_out: prev_out,
             signatures: vec![],
             pub_keys: vec![pk],
+            address_version: None,
         };
 
         let tx_ins = transaction_utils::construct_payment_tx_ins(vec![tx_const]);
@@ -892,10 +904,12 @@ mod tests {
         let mut key_material = BTreeMap::new();
         key_material.insert(prev_out.clone(), (pk, sk.clone()));
 
+
         let tx_1 = TxConstructor {
             previous_out: prev_out,
             signatures: vec![],
             pub_keys: vec![pk],
+            address_version: None,
         };
 
         let token_amount = TokenAmount(400000);
@@ -922,19 +936,23 @@ mod tests {
             previous_out: tx_1_out_p.clone(),
             signatures: vec![],
             pub_keys: vec![pk],
+            address_version: None,
         };
         let tx_ins_2 = transaction_utils::construct_payment_tx_ins(vec![tx_2]);
-        let tx_outs = vec![TxOut::new_token_amount(
-            hex::encode(crate::crypto::sha3_256::digest(&(5 as u64).to_le_bytes())),
-            token_amount,
+        let payment_tx_2 = transaction_utils::construct_payment_tx(
+            tx_ins_2,
+            ReceiverInfo {
+                address: hex::encode(crate::crypto::sha3_256::digest(&(5 as u64).to_le_bytes())),
+                asset: Asset::Token(token_amount),
+            },
             None,
-        )];
-        let payment_tx_2 = transaction_utils::construct_tx_core(tx_ins_2, tx_outs, None);
+            0,
+            &key_material);
 
         let tx_2_hash = transaction_utils::construct_tx_hash(&payment_tx_2);
         let tx_2_out_p = OutPoint::new_from_hash(tx_2_hash.parse().unwrap(), 0);
 
-        let expected = "01000000000000000120000000000000006736333962666336383662616131393337336336396366666466326564623030000000000000000000000000010000000000000000000000801a0600000000000000000000000000014000000000000000626161636531396232663935353334333438353936363865303738323164323633656236316635313132626434633533653534643635653032396438383831360600000000000000000000000000000000";
+        let expected = "0100000000000000012000000000000000673633396266633638366261613139333733633639636666646632656462303000000000080000000000000004000000400000000000000064343637336438303466646165393162353261343837623961353461323638343539653261326636363632353135613064343431393762623537396137666164010000004000000000000000b66606dda7348046ced913bff36080a1a112dd01e5605d6696e105fcc3544e966b955e12d219f444c510b5b87c1c251a57a5a6e27a73472212d40493fcde610a0200000020000000000000004a423a99c7d946e88da185f8f400e41cee388a95ecedc8603136de50aea12182000000002300000000000000500000000400000040000000000000003039653138346234363365356538643465666161336666353130663138343231633765353066653432666534646137623534353332636132303666333339626200000000350000000000000053000000010000000000000000000000801a0600000000000000000000000000014000000000000000626161636531396232663935353334333438353936363865303738323164323633656236316635313132626434633533653534643635653032396438383831360600000000000000000000000000000000";
         test_tx_matches_expected(&payment_tx_2, expected);
 
         // BTreemap
