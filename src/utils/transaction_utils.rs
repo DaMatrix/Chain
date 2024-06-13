@@ -103,16 +103,16 @@ pub fn construct_tx_in_signable_asset_hash(asset: &Asset) -> String {
 ///
 /// * `tx_in`   - TxIn values
 /// * `tx_out`  - TxOut values
-pub fn construct_tx_in_out_signable_hash(tx_in: &TxIn, tx_out: &[TxOut]) -> String {
+pub fn construct_tx_in_out_signable_hash(previous_out: &OutPoint, tx_out: &[TxOut]) -> String {
     let mut signable_list = tx_out
         .iter()
         .map(|tx| {
             debug!("txout: {:?}", tx);
-            serde_json::to_string(tx).unwrap_or("".to_string())
+            serde_json::to_string(tx).unwrap()
         })
         .collect::<Vec<String>>();
 
-    let tx_in_value = serde_json::to_string(&tx_in.previous_out).unwrap_or("".to_string());
+    let tx_in_value = serde_json::to_string(&previous_out).unwrap();
 
     signable_list.push(tx_in_value);
     let signable = signable_list.join("");
@@ -536,21 +536,16 @@ pub fn construct_rb_tx_core(
 pub fn update_input_signatures(tx_ins: &[TxIn], tx_outs: &[TxOut], key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>) -> Vec<TxIn> {
     let mut tx_ins = tx_ins.to_vec();
     for tx_in in tx_ins.iter_mut() {
-        let signable_prev_out = TxIn {
-            previous_out: tx_in.previous_out.clone(),
-            script_signature: Script::new(),
-        };
-        let signable_hash = construct_tx_in_out_signable_hash(&signable_prev_out, tx_outs);
-        let previous_out = signable_prev_out.previous_out;
+        if tx_in.previous_out.is_some() && key_material.get(&tx_in.previous_out.as_ref().unwrap()).is_some() {
+            let previous_out = tx_in.previous_out.as_ref().unwrap();
+            let signable_hash = construct_tx_in_out_signable_hash(previous_out, tx_outs);
 
-        if previous_out.is_some() && key_material.get(&previous_out.clone().unwrap()).is_some() {
-            let pk = key_material.get(&previous_out.clone().unwrap()).unwrap().0;
-            let sk = &key_material.get(&previous_out.unwrap()).unwrap().1;
+            let (pk, sk) = key_material.get(previous_out).unwrap();
     
             let script_signature = Script::pay2pkh(
                 hex::decode(&signable_hash).unwrap(),
                 sign_detached(signable_hash.as_bytes(), sk),
-                pk,
+                pk.clone(),
             );
     
             tx_in.script_signature = script_signature;

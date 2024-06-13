@@ -56,9 +56,6 @@ pub fn tx_is_valid<'a>(
 
     for tx_in in &tx.inputs {
 
-        let full_tx_hash = construct_tx_in_out_signable_hash(tx_in, &tx.outputs);
-        println!("full_tx_hash: {:?}", full_tx_hash);
-
         
         // Ensure the transaction is in the `UTXO` set
         let tx_out_point = match tx_in.previous_out.as_ref() {
@@ -85,7 +82,8 @@ pub fn tx_is_valid<'a>(
         // At this point `TxIn` will be valid
         let tx_out_pk = tx_out.script_public_key.as_ref();
         let tx_out_hash = construct_tx_in_signable_hash(tx_out_point);
-        let full_tx_hash = construct_tx_in_out_signable_hash(tx_in, &tx.outputs);
+        let full_tx_hash = construct_tx_in_out_signable_hash(
+            &tx_in.previous_out.as_ref().unwrap(), &tx.outputs);
 
         debug!("full_tx_hash: {:?}", full_tx_hash);
 
@@ -2836,7 +2834,8 @@ mod tests {
         let mut tx_ins = construct_payment_tx_ins(vec![tx_const]);
         tx_ins = update_input_signatures(&tx_ins, &tx_outs, &key_material);
 
-        let hash_to_sign = construct_tx_in_out_signable_hash(&tx_ins[0], &tx_outs);
+        let hash_to_sign = construct_tx_in_out_signable_hash(
+            &tx_ins[0].previous_out.as_ref().unwrap(), &tx_outs);
         let tx_out_pk = construct_address(&pk);
 
         assert!(tx_has_valid_p2pkh_sig(
@@ -3013,7 +3012,8 @@ mod tests {
             previous_out: Some(tx_outpoint.clone()),
         };
 
-        let valid_bytes = construct_tx_in_out_signable_hash(&tx_in, &ongoing_tx_outs.clone());
+        let valid_bytes = construct_tx_in_out_signable_hash(
+            &tx_in.previous_out.as_ref().unwrap(), &ongoing_tx_outs.clone());
         let valid_sig = sign::sign_detached(valid_bytes.as_bytes(), &sk);
 
         // Test cases:
