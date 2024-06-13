@@ -24,7 +24,7 @@ macro_rules! make_error_type {
             $( $(
                 #[$tattr:meta] )*
                 $tname:ident $(( $($targn:ident : $targ:ty),+ ))?
-                ; $tmsg:literal
+                ; $tmsg:literal $(( $($tmsgarg:expr),* ))?
                 $( ; $sourcen:expr )?
             ),+ $(,)?
         }
@@ -57,7 +57,7 @@ macro_rules! make_error_type {
                     $(
                         make_error_type!(@fmt_args $tname $(( $($targn),+ ))?)
                         =>
-                        write!(_f, $tmsg)
+                        write!(_f, $tmsg $($(, $tmsgarg)*)? )
                     ),+
                 }
             }

@@ -1,11 +1,13 @@
 use std::convert::TryInto;
 use serde::{Deserialize, Serialize};
+use crate::crypto::{sha3_256, sign_ed25519};
+use crate::crypto::sign_ed25519::{PublicKey, Signature};
 use crate::primitives::asset::{Asset, ItemAsset, TokenAmount};
 use crate::primitives::druid::{DdeValues, DruidExpectation};
 use crate::primitives::transaction::*;
 use crate::script::lang::{Script, ScriptBuilder};
 use crate::script::{OpCodes, ScriptError};
-use crate::utils::script_utils;
+use crate::utils::{script_utils, transaction_utils};
 use crate::utils::script_utils::MatchV6Script;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -15,12 +17,24 @@ struct V6PublicKey(
         [u8; 32]
 );
 
+impl From<&PublicKey> for V6PublicKey {
+    fn from(value: &PublicKey) -> Self {
+        Self(value.as_ref().try_into().unwrap())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 struct V6Signature(
         #[serde(serialize_with = "<[_]>::serialize")]
         #[serde(deserialize_with = "v6_deserialize_slice")]
         [u8; 64]
 );
+
+impl From<&Signature> for V6Signature {
+    fn from(value: &Signature) -> Self {
+        Self(value.as_ref().try_into().unwrap())
+    }
+}
 
 fn v6_deserialize_slice<'de, D: serde::Deserializer<'de>, const N: usize>(
     deserializer: D,
@@ -227,6 +241,120 @@ enum V6OpCodes {
     OP_NOP10 = 0xb9,
 }
 
+mod script_pattern {
+    use super::*;
+    use crate::utils::array_match_slice;
+
+    enum ScriptPattern<'a> {
+        Coinbase {
+            block_number: u64,
+        },
+        Create {
+            block_number: u64,
+            asset_hash: &'a str,
+            signature: &'a V6Signature,
+            public_key: &'a V6PublicKey,
+        },
+        P2PKH {
+            check_data: &'a str,
+            signature: &'a V6Signature,
+            public_key: &'a V6PublicKey,
+            public_key_hash: &'a str,
+        },
+    }
+
+    /// Checks if a script matches any of the known v6 script patterns and extracts the relevant fields.
+    ///
+    /// ### Arguments
+    ///
+    /// * `script`      - Script to match
+    fn match_v6_script(script: &V6Script) -> Result<ScriptPattern, V6Script> {
+        if let Some(block_number) = match_coinbase_script(script) {
+            Ok(ScriptPattern::Coinbase { block_number })
+        } else if let Some((check_data, signature, public_key, public_key_hash)) = match_p2pkh_script(script) {
+            Ok(ScriptPattern::P2PKH { check_data, signature, public_key, public_key_hash })
+        } else if let Some((block_number, asset_hash, signature, public_key)) = match_create_script(script) {
+            Ok(ScriptPattern::Create { block_number, asset_hash, signature, public_key })
+        } else {
+            Err(script.clone())
+        }
+    }
+
+    /// Checks if a script matches the coinbase pattern and extracts the relevant fields.
+    ///
+    /// ### Arguments
+    ///
+    /// * `script`      - Script to match
+    fn match_coinbase_script(
+        script: &V6Script,
+    ) -> Option<u64> {
+        if let Some([
+                    V6StackEntry::Num(block_number),
+                    ]) = array_match_slice(&script.to_entries().ok()?) {
+            Some(block_number)
+        } else {
+            None
+        }
+    }
+
+    /// Checks if a script matches the item creation pattern and extracts the relevant fields.
+    ///
+    /// ### Arguments
+    ///
+    /// * `script`      - Script to match
+    fn match_create_script(
+        script: &V6Script,
+    ) -> Option<(u64, &str, &V6Signature, &V6PublicKey)> {
+        if let Some([
+                    V6StackEntry::Op(V6OpCodes::OP_CREATE),
+                    V6StackEntry::Num(block_number),
+                    V6StackEntry::Op(V6OpCodes::OP_DROP),
+                    V6StackEntry::Bytes(b),
+                    V6StackEntry::Signature(signature),
+                    V6StackEntry::PubKey(public_key),
+                    V6StackEntry::Op(V6OpCodes::OP_CHECKSIG),
+                    ]) = array_match_slice(&script.to_entries().ok()?) {
+            Some((
+                block_number,
+                b,
+                signature,
+                public_key,
+            ))
+        } else {
+            None
+        }
+    }
+
+    /// Checks if a script matches the P2PKH pattern and extracts the relevant fields.
+    ///
+    /// ### Arguments
+    ///
+    /// * `script`      - Script to match
+    fn match_p2pkh_script(
+        script: &V6Script,
+    ) -> Option<(&str, &V6Signature, &V6PublicKey, &str)> {
+        if let Some([
+                    V6StackEntry::Bytes(check_data),
+                    V6StackEntry::Signature(signature),
+                    V6StackEntry::PubKey(public_key),
+                    V6StackEntry::Op(V6OpCodes::OP_DUP),
+                    V6StackEntry::Op(V6OpCodes::OP_HASH256),
+                    V6StackEntry::Bytes(public_key_hash),
+                    V6StackEntry::Op(V6OpCodes::OP_EQUALVERIFY),
+                    V6StackEntry::Op(V6OpCodes::OP_CHECKSIG),
+                    ]) = array_match_slice(&script.to_entries().ok()?) {
+            Some((
+                check_data,
+                signature,
+                public_key,
+                public_key_hash,
+            ))
+        } else {
+            None
+        }
+    }
+}
+
 make_error_type!(pub enum FromV6Error {
     BadVersion(version: u64); "not a v6 transaction: {version}",
     DataRemaining(remaining: usize);
@@ -239,6 +367,15 @@ make_error_type!(pub enum FromV6Error {
     BadTxHash(cause: TxHashError);
         "transaction contained invalid transaction hash: {cause}"; cause,
     BadOutPointIndex(index: i32); "negative outpoint index: {index}",
+
+    BadScriptPattern(script: String); "unknown v6 script format: {script}",
+    HasPreviousOut(pattern_type: &'static str);
+        "{pattern_type} transaction input must not have a previous_out",
+    MissingPreviousOut(pattern_type: &'static str);
+        "{pattern_type} transaction input must have a previous_out",
+    BadP2PKHHash; "P2PKH TxIn public key hash doesn't match public key",
+    BadP2PKHCheckData; "P2PKH TxIn check_data isn't valid",
+    BadP2PKHSignature; "P2PKH TxIn signature isn't valid",
 
     Deserialize(cause: bincode::error::DecodeError);
         "failed to deserialize v6 transaction: {cause}"; cause,
@@ -377,11 +514,84 @@ fn upgrade_v6_outpoint(old: &V6OutPoint) -> Result<OutPoint, FromV6Error> {
     })
 }
 
-fn upgrade_v6_txin(old: &V6TxIn) -> Result<TxIn, FromV6Error> {
-    Ok(TxIn {
-        previous_out: old.previous_out.as_ref().map(upgrade_v6_outpoint).transpose()?,
-        script_signature: upgrade_v6_script(&old.script_signature)?,
-    })
+fn upgrade_v6_txin(old: &V6TxIn, upgraded_txouts: &[TxOut]) -> Result<TxIn, FromV6Error> {
+    let previous_out = old.previous_out.as_ref()
+        .map(upgrade_v6_outpoint)
+        .transpose()?;
+
+    //match &old.script_signature.stack.as_slice()[..] {
+    match &old.script_signature.stack.as_slice() {
+        [ // Coinbase
+        V6StackEntry::Num(block_number)
+        ] => match previous_out {
+            None => Ok(TxIn::Coinbase(CoinbaseTxIn {
+                block_number: *block_number,
+            })),
+            Some(_) => Err(FromV6Error::HasPreviousOut("coinbase")),
+        },
+
+        [ // Create
+        V6StackEntry::Op(V6OpCodes::OP_CREATE),
+        V6StackEntry::Num(block_number),
+        V6StackEntry::Op(V6OpCodes::OP_DROP),
+        V6StackEntry::Bytes(b),
+        V6StackEntry::Signature(signature),
+        V6StackEntry::PubKey(public_key),
+        V6StackEntry::Op(V6OpCodes::OP_CHECKSIG),
+        ] => match previous_out {
+            None => Ok(TxIn::Create(CreateTxIn {
+                block_number: *block_number,
+                asset_hash: hex::decode(b).map_err(|err| FromV6Error::NotHexBytes(b.clone(), err))?,
+                public_key: PublicKey::from_slice(&public_key.0).unwrap(),
+                signature: Signature::from_slice(&signature.0).unwrap(),
+            })),
+            Some(_) => Err(FromV6Error::HasPreviousOut("create")),
+        },
+
+        [ // P2PKH
+        V6StackEntry::Bytes(check_data),
+        V6StackEntry::Signature(signature),
+        V6StackEntry::PubKey(public_key),
+        V6StackEntry::Op(V6OpCodes::OP_DUP),
+        V6StackEntry::Op(V6OpCodes::OP_HASH256),
+        V6StackEntry::Bytes(public_key_hash),
+        V6StackEntry::Op(V6OpCodes::OP_EQUALVERIFY),
+        V6StackEntry::Op(V6OpCodes::OP_CHECKSIG),
+        ] => match previous_out {
+            Some(previous_out) => {
+                // Verify that the public key hash is correct
+                let expected_hash = hex::encode(sha3_256::digest(&public_key.0));
+                if expected_hash != *public_key_hash {
+                    return Err(FromV6Error::BadP2PKHHash);
+                }
+
+                // Verify that the check_data is valid
+                let expected_check_data_1 = transaction_utils::construct_tx_in_signable_hash(
+                    &previous_out);
+                let expected_check_data_2 = transaction_utils::construct_tx_in_out_signable_hash(
+                    &previous_out, upgraded_txouts);
+                if expected_check_data_1 != *check_data && expected_check_data_2 != *check_data {
+                    return Err(FromV6Error::BadP2PKHCheckData);
+                }
+
+                // Verify that the signature is valid
+                let public_key = PublicKey::from_slice(&public_key.0).unwrap();
+                let signature = Signature::from_slice(&signature.0).unwrap();
+                if !sign_ed25519::verify_detached(&signature, check_data.as_bytes(), &public_key) {
+                    return Err(FromV6Error::BadP2PKHSignature);
+                }
+
+                Ok(TxIn::P2PKH(P2PKHTxIn {
+                    previous_out,
+                    public_key,
+                    signature,
+                }))
+            },
+            None => Err(FromV6Error::HasPreviousOut("p2pkh")),
+        },
+
+        _ => Err(FromV6Error::BadScriptPattern(format!("{:?}", old.script_signature))),
+    }
 }
 
 fn upgrade_v6_txout(old: &V6TxOut) -> Result<TxOut, FromV6Error> {
@@ -415,13 +625,20 @@ fn upgrade_v6_tx(old: &V6Transaction) -> Result<Transaction, FromV6Error> {
     if old.version != 6 {
         return Err(FromV6Error::BadVersion(old.version));
     }
-    
+
+    let outputs = old.outputs.iter().map(upgrade_v6_txout).collect::<Result<Vec<_>, _>>()?;
+    let fees = old.fees.iter().map(upgrade_v6_txout).collect::<Result<Vec<_>, _>>()?;
+    let druid_info = old.druid_info.as_ref().map(upgrade_v6_ddevalues).transpose()?;
+    let inputs = old.inputs.iter()
+        .map(|old_txin| upgrade_v6_txin(old_txin, &outputs))
+        .collect::<Result<Vec<_>, _>>()?;
+
     Ok(Transaction {
         version: TxVersion::V6,
-        inputs: old.inputs.iter().map(upgrade_v6_txin).collect::<Result<Vec<_>, _>>()?,
-        outputs: old.outputs.iter().map(upgrade_v6_txout).collect::<Result<Vec<_>, _>>()?,
-        fees: old.fees.iter().map(upgrade_v6_txout).collect::<Result<Vec<_>, _>>()?,
-        druid_info: old.druid_info.as_ref().map(upgrade_v6_ddevalues).transpose()?,
+        inputs,
+        outputs,
+        fees,
+        druid_info,
     })
 }
 
@@ -452,6 +669,7 @@ make_error_type!(pub enum ToV6Error {
     BadScript; "script doesn't match any known v6 patterns",
 
     BadOutPointIndex(index: u32); "outpoint index too high: {index}",
+    BadP2PKHSignature; "P2PKH TxIn signature doesn't match any known pattern",
 
     Serialize(cause: bincode::error::EncodeError);
         "failed to serialize v6 transaction: {cause}"; cause,
@@ -508,10 +726,50 @@ fn downgrade_v6_outpoint(old: &OutPoint) -> Result<V6OutPoint, ToV6Error> {
     })
 }
 
-fn downgrade_v6_txin(old: &TxIn) -> Result<V6TxIn, ToV6Error> {
-    Ok(V6TxIn {
-        previous_out: old.previous_out.as_ref().map(downgrade_v6_outpoint).transpose()?,
-        script_signature: downgrade_v6_script(&old.script_signature)?,
+fn downgrade_v6_txin(old: &TxIn, new_txouts: &[TxOut]) -> Result<V6TxIn, ToV6Error> {
+    Ok(match old {
+        TxIn::Coinbase(coinbase) => V6TxIn {
+            previous_out: None,
+            script_signature: V6Script {
+                stack: vec![
+                    V6StackEntry::Num(coinbase.block_number),
+                ]
+            },
+        },
+        TxIn::Create(create) => V6TxIn {
+            previous_out: None,
+            script_signature: V6Script {
+                stack: vec![
+                    V6StackEntry::Op(V6OpCodes::OP_CREATE),
+                    V6StackEntry::Num(create.block_number),
+                    V6StackEntry::Op(V6OpCodes::OP_DROP),
+                    V6StackEntry::Bytes(hex::encode(&create.asset_hash)),
+                    V6StackEntry::Signature(create.signature.into()),
+                    V6StackEntry::PubKey(create.public_key.into()),
+                    V6StackEntry::Op(V6OpCodes::OP_CHECKSIG),
+                ]
+            },
+        },
+        TxIn::P2PKH(p2pkh) => V6TxIn {
+            previous_out: Some(downgrade_v6_outpoint(&p2pkh.previous_out)?),
+            script_signature: {
+                let check_data = find_v6_p2pkh_check_data(p2pkh, new_txouts)
+                    .ok_or_else(ToV6Error::BadP2PKHSignature)?;
+
+                V6Script {
+                    stack: vec![
+                        V6StackEntry::Bytes(check_data),
+                        V6StackEntry::Signature(p2pkh.signature.into()),
+                        V6StackEntry::PubKey(p2pkh.public_key.into()),
+                        V6StackEntry::Op(V6OpCodes::OP_DUP),
+                        V6StackEntry::Op(V6OpCodes::OP_HASH256),
+                        V6StackEntry::Bytes(hex::encode(sha3_256::digest(p2pkh.public_key.as_ref()))),
+                        V6StackEntry::Op(V6OpCodes::OP_EQUALVERIFY),
+                        V6StackEntry::Op(V6OpCodes::OP_CHECKSIG),
+                    ]
+                }
+            },
+        },
     })
 }
 
@@ -566,11 +824,40 @@ pub fn serialize(tx: &Transaction) -> Result<Vec<u8>, ToV6Error> {
         .map_err(ToV6Error::Serialize)
 }
 
-/// Checks if a transaction meets all the requirements for upgrading to version 7, otherwise
+/// Given a P2PKH `TxIn`, determine whether it signed `construct_tx_in_signable_hash` or
+/// `construct_tx_in_out_signable_hash`.
+///
+/// ### Arguments
+///
+/// * `tx_in`   - A P2PKH transaction input from a v6 transaction in the new object representation
+/// * `tx_outs` - All transaction outputs from the same v6 transaction in the new object
+///               representation
+pub fn find_v6_p2pkh_check_data(
+    tx_in: &P2PKHTxIn,
+    tx_outs: &[TxOut],
+) -> Option<String> {
+    // Figure out which signable_hash function was used to sign this transaction
+    let expected_check_data_1 = transaction_utils::construct_tx_in_signable_hash(
+        &tx_in.previous_out);
+    let expected_check_data_2 = transaction_utils::construct_tx_in_out_signable_hash(
+        &tx_in.previous_out, tx_outs);
+
+    if sign_ed25519::verify_detached(
+        &tx_in.signature, expected_check_data_1.as_bytes(), &tx_in.public_key) {
+        Some(expected_check_data_1)
+    } else if sign_ed25519::verify_detached(
+        &tx_in.signature, expected_check_data_2.as_bytes(), &tx_in.public_key) {
+        Some(expected_check_data_2)
+    } else {
+        None
+    }
+}
+
+/*/// Checks if a transaction meets all the requirements for upgrading to version 7, otherwise
 /// it panics.
 ///
 /// Aside from artificial transactions created in test code, this should always pass.
-/*pub fn validate_v7_preconditions(tx: &Transaction) {
+pub fn validate_v7_preconditions(tx: &Transaction) {
     use crate::constants::{STANDARD_ADDRESS_LENGTH_BYTES, TX_HASH_LENGTH};
     use crate::utils::{script_utils, transaction_utils};
 

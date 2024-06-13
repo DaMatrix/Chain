@@ -1,8 +1,8 @@
 #![allow(unused)]
 
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use crate::constants::*;
-use crate::crypto::sign_ed25519::{PublicKey, Signature};
+use crate::crypto::sign_ed25519::{PublicKey, SecretKey, Signature};
 use crate::primitives::{
     asset::{Asset, ItemAsset, TokenAmount},
     druid::{DdeValues, DruidExpectation},
@@ -75,9 +75,12 @@ impl GenesisTxHashSpec {
 
 /// A user-friendly construction struct for a TxIn
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[deprecated = "This is no longer necessary"]
 pub struct TxConstructor {
     pub previous_out: OutPoint,
+    #[deprecated = "This is never accessed"]
     pub signatures: Vec<Signature>,
+    #[deprecated = "This is never accessed"]
     pub pub_keys: Vec<PublicKey>,
 }
 
@@ -231,53 +234,133 @@ impl Placeholder for OutPoint {
     }
 }
 
-/// An input of a transaction. It contains the location of the previous
-/// transaction's output that it claims and a signature that matches the
-/// output's public key.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Encode, Decode)]
-pub struct TxIn {
-    pub previous_out: Option<OutPoint>,
-    pub script_signature: Script,
+#[derive(Clone, Copy, Debug)]
+pub enum TxInConstructor<'a> {
+    Coinbase {
+        block_number: u64,
+    },
+    Create {
+        block_number: u64,
+        asset: &'a Asset,
+        public_key: &'a PublicKey,
+        secret_key: &'a SecretKey,
+    },
+    P2PKH {
+        previous_out: &'a OutPoint,
+        public_key: &'a PublicKey,
+        secret_key: &'a SecretKey,
+    },
 }
 
-impl Default for TxIn {
-    fn default() -> Self {
-        Self::new()
-    }
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Encode, Decode)]
+pub struct CoinbaseTxIn {
+    pub block_number: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Encode, Decode)]
+pub struct CreateTxIn {
+    pub block_number: u64,
+    pub asset_hash: Vec<u8>, // TODO: use a fixed-length type? // TODO: should we even keep this?
+    pub public_key: PublicKey,
+    pub signature: Signature,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Encode, Decode)]
+pub struct P2PKHTxIn {
+    pub previous_out: OutPoint,
+    pub public_key: PublicKey,
+    pub signature: Signature,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Encode, Decode)]
+pub enum TxIn {
+    Coinbase(CoinbaseTxIn),
+    Create(CreateTxIn),
+    P2PKH(P2PKHTxIn),
 }
 
 impl TxIn {
-    /// Creates a new TxIn instance
-    #[deprecated = "TxIn should not be used in a mutable fashion"]
-    pub fn new() -> TxIn {
-        TxIn {
-            previous_out: None,
-            script_signature: Script::build(&[ScriptEntry::Int(0)]),
+    /// If this TxIn redeems a previous transaction output, gets the `OutPoint` referencing the
+    /// redeemed transaction.
+    pub fn find_previous_out(&self) -> Option<&OutPoint> {
+        match self {
+            TxIn::Coinbase(_) => None,
+            TxIn::Create(_) => None,
+            TxIn::P2PKH(p2pkh) => Some(&p2pkh.previous_out),
         }
     }
 
-    /// Creates a new TxIn instance from provided script and no previous_out
-    ///
-    /// ### Arguments
-    ///
-    /// * `script_sig`      - Script signature of the previous outpoint
-    pub fn new_from_script(script_sig: Script) -> TxIn {
-        TxIn {
-            previous_out: None,
-            script_signature: script_sig,
+    /// Identifies which sort of transaction input this is.
+    pub fn sort(&self) -> TxInSort {
+        match self {
+            TxIn::Coinbase(_) => TxInSort::Coinbase,
+            TxIn::Create(_) => TxInSort::Create,
+            TxIn::P2PKH(_) => TxInSort::P2PKH,
         }
     }
+}
 
-    /// Creates a new TxIn instance from provided inputs
-    ///
-    /// ### Arguments
-    ///
-    /// * `previous_out`    - OutPoint of the previous transaction
-    /// * `script_sig`      - Script signature of the previous outpoint
-    pub fn new_from_input(previous_out: OutPoint, script_sig: Script) -> TxIn {
-        TxIn {
-            previous_out: Some(previous_out),
-            script_signature: script_sig,
+/// The different kinds of transaction inputs.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TxInSort {
+    Coinbase,
+    Create,
+    P2PKH,
+}
+
+/// An error which can occur when trying to convert a TxIn to a specific subtype.
+#[derive(Debug)]
+pub struct TxInConversionError {
+    pub expected: TxInSort,
+    pub found: TxInSort,
+}
+
+impl std::error::Error for TxInConversionError {}
+
+impl fmt::Display for TxInConversionError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "wrong TxIn type: expected {:?}, found {:?}", self.expected, self.found)
+    }
+}
+
+impl<'a> TryFrom<&'a TxIn> for &'a CoinbaseTxIn {
+    type Error = TxInConversionError;
+
+    fn try_from(value: &'a TxIn) -> Result<Self, Self::Error> {
+        match value {
+            TxIn::Coinbase(coinbase) => Ok(coinbase),
+            _ => Err(TxInConversionError {
+                expected: TxInSort::Coinbase,
+                found: value.sort(),
+            }),
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a TxIn> for &'a CreateTxIn {
+    type Error = TxInConversionError;
+
+    fn try_from(value: &'a TxIn) -> Result<Self, Self::Error> {
+        match value {
+            TxIn::Create(create) => Ok(create),
+            _ => Err(TxInConversionError {
+                expected: TxInSort::Create,
+                found: value.sort(),
+            }),
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a TxIn> for &'a P2PKHTxIn {
+    type Error = TxInConversionError;
+
+    fn try_from(value: &'a TxIn) -> Result<Self, Self::Error> {
+        match value {
+            TxIn::P2PKH(p2pkh) => Ok(p2pkh),
+            _ => Err(TxInConversionError {
+                expected: TxInSort::P2PKH,
+                found: value.sort(),
+                }),
         }
     }
 }
@@ -383,7 +466,7 @@ impl Transaction {
     /// Gets the create asset assigned to this transaction, if it exists
     fn get_create_asset(&self) -> Option<&Asset> {
         let is_create = self.inputs.len() == 1
-            && self.inputs[0].previous_out.is_none()
+            && self.inputs[0].find_previous_out().is_none()
             && self.outputs.len() == 1;
 
         is_create.then(|| &self.outputs[0].value)
@@ -401,20 +484,6 @@ impl Transaction {
         self.get_create_asset()
             .map(|a| !a.is_token())
             .unwrap_or_default()
-    }
-
-    /// Returns whether current transaction is a P2SH tx
-    pub fn is_p2sh_tx(&self) -> bool {
-        if self.outputs.len() != 1 {
-            return false;
-        }
-
-        if let Some(pk) = &self.outputs[0].script_public_key {
-            let pk_bytes = pk.as_bytes();
-            return pk_bytes[0] == P2SH_PREPEND;
-        }
-
-        false
     }
 
     /// Serializes this transaction

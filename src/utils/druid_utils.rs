@@ -23,7 +23,7 @@ pub fn druid_expectations_are_met<'a>(
     for tx in transactions {
         info!("");
         if let Some(druid_info) = &tx.druid_info {
-            let ins = construct_tx_ins_address(&tx.inputs);
+            let ins = construct_tx_ins_address(tx);
 
             // Ensure match with passed DRUID
             if druid_info.druid == druid {

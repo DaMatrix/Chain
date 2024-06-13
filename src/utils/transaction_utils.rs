@@ -1,5 +1,5 @@
 use crate::constants::*;
-use crate::crypto::sha3_256;
+use crate::crypto::{sha3_256, sign_ed25519};
 use crate::crypto::sign_ed25519::{self as sign, sign_detached, PublicKey, SecretKey};
 use crate::primitives::asset::Asset;
 use crate::primitives::druid::{DdeValues, DruidExpectation};
@@ -7,6 +7,7 @@ use crate::primitives::transaction::*;
 use crate::script::lang::Script;
 use crate::script::{OpCodes, ScriptEntry, StackEntry};
 use std::collections::BTreeMap;
+use std::convert::TryInto;
 use tracing::debug;
 use crate::primitives::format;
 use crate::utils::script_utils::{match_v6_script, MatchV6Script};
@@ -182,26 +183,40 @@ fn get_v6_script_signable_string(script: &Script) -> String {
 /// ### Arguments
 ///
 /// * `tx_in`   - TxIn value
-pub fn get_tx_in_address_signable_string(tx_in: &TxIn) -> String {
-    let out_point_signable_string = match &tx_in.previous_out {
-        Some(out_point) => get_out_point_signable_string(out_point),
-        None => "null".to_owned(),
-    };
-    // TODO: this needs to handle different transaction versions differently
-    let script_signable_string = get_v6_script_signable_string(&tx_in.script_signature);
-    debug!("Formatted string: {out_point_signable_string}-{script_signable_string}");
-    format!("{out_point_signable_string}-{script_signable_string}")
+fn get_tx_in_address_signable_string(tx: &Transaction, tx_in: (usize, &TxIn)) -> String {
+    let (_tx_in_index, tx_in) = tx_in;
+
+    match tx.version {
+        TxVersion::V6 => match tx_in {
+            TxIn::Coinbase(CoinbaseTxIn { block_number }) =>
+                format!("null-Num:{}", block_number),
+            TxIn::Create(CreateTxIn { block_number, asset_hash, signature, public_key }) =>
+                format!("null-Op:OP_CREATE-Num:{}-Op:OP_DROP-Bytes:{}-Signature:{}-PubKey:{}-Op:OP_CHECKSIG",
+                        block_number,
+                        hex::encode(asset_hash),
+                        hex::encode(signature.as_ref()),
+                        hex::encode(public_key.as_ref())),
+            TxIn::P2PKH(P2PKHTxIn { previous_out, public_key, signature }) =>
+                format!("{}-Bytes:{}-Signature:{}-PubKey:{}-Op:OP_DUP-Op:OP_HASH256-Bytes:{}-Op:OP_EQUALVERIFY-Op:OP_CHECKSIG",
+                        get_out_point_signable_string(previous_out),
+                        format::v6::find_v6_p2pkh_check_data(
+                            tx_in.try_into().unwrap(), &tx.outputs).unwrap(),
+                        hex::encode(signature.as_ref()),
+                        hex::encode(public_key.as_ref()),
+                        hex::encode(sha3_256::digest(public_key.as_ref()))),
+        }
+    }
 }
 
 /// Constructs address for a TxIn collection
 ///
 /// ### Arguments
 ///
-/// * `tx_ins`   - TxIn collection
-pub fn construct_tx_ins_address(tx_ins: &[TxIn]) -> String {
-    let signable_tx_ins = tx_ins
-        .iter()
-        .map(get_tx_in_address_signable_string)
+/// * `tx`   - The transaction
+pub fn construct_tx_ins_address(tx: &Transaction) -> String {
+    let signable_tx_ins = tx.inputs.iter()
+        .enumerate()
+        .map(|tx_in| get_tx_in_address_signable_string(tx, tx_in))
         .collect::<Vec<String>>()
         .join("-");
     hex::encode(sha3_256::digest(signable_tx_ins.as_bytes()))
@@ -218,7 +233,7 @@ pub fn get_inputs_previous_out_point<'a>(
     utxo_entries
         .filter(|tx| !tx.is_create_tx())
         .flat_map(|val| val.inputs.iter())
-        .map(|input| input.previous_out.as_ref().unwrap())
+        .map(|input| input.find_previous_out().as_ref().unwrap())
 }
 
 /// Get all the OutPoint and Transaction from the (hash,transactions)
@@ -342,10 +357,12 @@ pub fn construct_create_tx_in(
     let asset_hash = construct_tx_in_signable_asset_hash(asset);
     let signature = sign::sign_detached(asset_hash.as_bytes(), secret_key);
 
-    vec![TxIn {
-        previous_out: None,
-        script_signature: Script::new_create_asset(block_num, asset_hash, signature, public_key),
-    }]
+    vec![TxIn::Create(CreateTxIn {
+        block_number: block_num,
+        asset_hash: hex::decode(&asset_hash).unwrap(),
+        public_key,
+        signature,
+    })]
 }
 
 /// Constructs a item data asset for use in accepting payments
@@ -410,43 +427,13 @@ pub fn construct_payment_tx(
     construct_tx_core(final_tx_ins, tx_outs, fee)
 }
 
-/// Constructs a P2SH transaction to pay a receiver
-///
-/// ### Arguments
-///
-/// * `tx_ins`              - Input/s to pay from
-/// * `script`              - Script to validate
-/// * `drs_block_hash`      - Hash of the block containing the original DRS. Only for data trades
-/// * `asset`               - Asset to send
-/// * `locktime`            - Block height below which the payment is restricted. "0" means no locktime
-pub fn construct_p2sh_tx(
-    tx_ins: Vec<TxIn>,
-    fee: Option<ReceiverInfo>,
-    script: &Script,
-    asset: Asset,
-    locktime: u64,
-    key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>
-) -> Transaction {
-    let script_hash = construct_p2sh_address(script);
-
-    let tx_out = TxOut {
-        value: asset,
-        locktime,
-        script_public_key: Some(script_hash),
-    };
-    let tx_outs = vec![tx_out];
-    let final_tx_ins = update_input_signatures(&tx_ins, &tx_outs, key_material);
-
-    construct_tx_core(final_tx_ins, tx_outs, fee)
-}
-
 /// Constructs a P2SH transaction to burn tokens
 ///
 /// ### Arguments
 ///
 /// * `tx_ins`  - Input/s to pay from
 pub fn construct_burn_tx(tx_ins: Vec<TxIn>, fee: Option<ReceiverInfo>, key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>) -> Transaction {
-    let script = Script::build(&[ScriptEntry::Op(OpCodes::OP_BURN)]);
+    /*let script = Script::build(&[ScriptEntry::Op(OpCodes::OP_BURN)]);
     let script_hash = construct_p2sh_address(&script);
 
     let tx_out = TxOut {
@@ -457,7 +444,8 @@ pub fn construct_burn_tx(tx_ins: Vec<TxIn>, fee: Option<ReceiverInfo>, key_mater
 
     let final_tx_ins = update_input_signatures(&tx_ins, &tx_outs, key_material);
 
-    construct_tx_core(final_tx_ins, tx_outs, fee)
+    construct_tx_core(final_tx_ins, tx_outs, fee)*/
+    todo!()
 }
 
 /// Constructs a transaction to pay a receiver
@@ -512,9 +500,9 @@ pub fn construct_rb_tx_core(
     druid_expectation: Vec<DruidExpectation>,
     key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>
 ) -> Transaction {
-    let mut tx = construct_tx_core(tx_ins, tx_outs, fee);
+    let tx_ins = update_input_signatures(&tx_ins, &tx_outs, key_material);
 
-    tx.inputs = update_input_signatures(&tx.inputs, &tx.outputs, key_material);
+    let mut tx = construct_tx_core(tx_ins, tx_outs, fee);
 
     tx.druid_info = Some(DdeValues {
         druid,
@@ -526,33 +514,41 @@ pub fn construct_rb_tx_core(
     tx
 }
 
-/// Updates the input signatures with output information
+/// Builds `TxIn`s from the given `TxInConstructor`s.
 /// 
 /// ### Arguments
 /// 
 /// * `tx_ins`          - Inputs to the transaction
 /// * `tx_outs`         - Outputs of the transaction
-/// * `key_material`    - Key material for signing
-pub fn update_input_signatures(tx_ins: &[TxIn], tx_outs: &[TxOut], key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>) -> Vec<TxIn> {
-    let mut tx_ins = tx_ins.to_vec();
-    for tx_in in tx_ins.iter_mut() {
-        if tx_in.previous_out.is_some() && key_material.get(&tx_in.previous_out.as_ref().unwrap()).is_some() {
-            let previous_out = tx_in.previous_out.as_ref().unwrap();
-            let signable_hash = construct_tx_in_out_signable_hash(previous_out, tx_outs);
+// TODO: rename this to something less confusing
+pub fn update_input_signatures(tx_ins: &[TxInConstructor], tx_outs: &[TxOut], key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>) -> Vec<TxIn> {
+    tx_ins.iter()
+        .map(|ctor| match *ctor {
+            TxInConstructor::Coinbase { block_number } =>
+                TxIn::Coinbase(CoinbaseTxIn {
+                    block_number,
+                }),
+            TxInConstructor::Create { block_number, asset, public_key, secret_key } => {
+                let asset_hash = construct_tx_in_signable_asset_hash(asset);
 
-            let (pk, sk) = key_material.get(previous_out).unwrap();
-    
-            let script_signature = Script::pay2pkh(
-                hex::decode(&signable_hash).unwrap(),
-                sign_detached(signable_hash.as_bytes(), sk),
-                pk.clone(),
-            );
-    
-            tx_in.script_signature = script_signature;
-        }
-    }
+                TxIn::Create(CreateTxIn {
+                    block_number,
+                    asset_hash: hex::decode(&asset_hash).unwrap(),
+                    public_key: public_key.clone(),
+                    signature: sign_ed25519::sign_detached(asset_hash.as_bytes(), secret_key),
+                })
+            },
+            TxInConstructor::P2PKH { previous_out, public_key, secret_key } => {
+                let signable_hash = construct_tx_in_out_signable_hash(previous_out, tx_outs);
 
-    tx_ins
+                TxIn::P2PKH(P2PKHTxIn {
+                    previous_out: previous_out.clone(),
+                    public_key: public_key.clone(),
+                    signature: sign_ed25519::sign_detached(signable_hash.as_bytes(), secret_key),
+                })
+            },
+        })
+        .collect()
 }
 
 /// Constructs the "send" half of a item-based payment
@@ -630,6 +626,7 @@ pub fn construct_rb_receive_payment_tx(
 /// ### Arguments
 ///
 /// * `tx_values`   - Series of values required for TxIn construction
+#[deprecated = "This is no longer necessary"]
 pub fn construct_payment_tx_ins(tx_values: Vec<TxConstructor>) -> Vec<TxIn> {
     let mut tx_ins = Vec::new();
 
@@ -686,9 +683,10 @@ pub fn construct_dde_tx(
     fee: Option<ReceiverInfo>,
     key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>
 ) -> Transaction {
+    let tx_ins = update_input_signatures(&tx_ins, &tx_outs, key_material);
+
     let mut tx = construct_tx_core(tx_ins, tx_outs, fee);
 
-    tx.inputs = update_input_signatures(&tx.inputs, &tx.outputs, key_material);
     tx.druid_info = Some(druid_info);
 
     tx
@@ -729,7 +727,9 @@ mod tests {
 
     #[test]
     fn test_construct_a_valid_p2sh_tx() {
-        let token_amount = TokenAmount(400000);
+        todo!();
+
+        /*let token_amount = TokenAmount(400000);
         let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs();
         let script = Script::build(&[
             ScriptEntry::Int(10),
@@ -766,14 +766,16 @@ mod tests {
         assert!(tx_has_valid_p2sh_script(
             &redeeming_tx.inputs[0].script_signature,
             p2sh_tx.outputs[0].script_public_key.as_ref().unwrap()
-        ));
+        ));*/
 
         // TODO: Add assertion for full tx validity
     }
 
     #[test]
     fn test_construct_a_valid_burn_tx() {
-        let token_amount = TokenAmount(400000);
+        todo!();
+
+        /*let token_amount = TokenAmount(400000);
         let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs();
 
         let burn_tx = construct_burn_tx(tx_ins, None, &key_material);
@@ -808,7 +810,7 @@ mod tests {
         assert!(!tx_has_valid_p2sh_script(
             &redeeming_tx.inputs[0].script_signature,
             burn_tx.outputs[0].script_public_key.as_ref().unwrap()
-        ));
+        ));*/
 
         // TODO: Add assertion for full tx validity
     }
@@ -1325,9 +1327,11 @@ mod tests {
             "efa9dcba0f3282b3ed4a6aa1ccdb169d6685a30d7b2af7a2171a5682f3112359",
         ];
 
-        let signatures = ["660e4698d817d409feb209699b15935048c8b3c4ac86a23f25b05aa32fb8b87e7cd029b83220d31a0b2717bd63b47a320a7728355d7fae43a665d6e27743e20d", 
+        let signatures = [
+            "660e4698d817d409feb209699b15935048c8b3c4ac86a23f25b05aa32fb8b87e7cd029b83220d31a0b2717bd63b47a320a7728355d7fae43a665d6e27743e20d",
             "fd107c9446cdcbd8fbb0d6b88c73067c9bd15de03fff677b0129acf1bd2d14a5ab8a63c7eb6fe8c5acc4b44b033744760847194a15b006368d178c85243d0605", 
-            "e1a436bbfcb3e411be1ce6088cdb4c39d7e79f8fe427943e74307e43864fd0f6ef26123f1439b92c075edd031d17feb4dd265c6fcc2e5ed571df48a03c396100"];
+            "e1a436bbfcb3e411be1ce6088cdb4c39d7e79f8fe427943e74307e43864fd0f6ef26123f1439b92c075edd031d17feb4dd265c6fcc2e5ed571df48a03c396100",
+        ];
 
         let signable_data = [
             "927b3411743452e5e0d73e9e40a4fa3c842b3d00dabde7f9af7e44661ce02c88",
@@ -1360,7 +1364,14 @@ mod tests {
 
         let expected =
             "f3d7b80f82f72260ba1b6235d608f0af871b7968ac1cde5ddf71a4a6b3385eec".to_owned();
-        let actual = construct_tx_ins_address(&tx_ins);
+
+        let actual = construct_tx_ins_address(&Transaction {
+            version: TxVersion::V6,
+            inputs: tx_ins,
+            outputs: vec![], // TODO: this probably won't end up matching
+            fees: vec![],
+            druid_info: None,
+        });
 
         //
         // Assert
