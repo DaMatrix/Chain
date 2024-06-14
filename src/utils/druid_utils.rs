@@ -23,7 +23,7 @@ pub fn druid_expectations_are_met<'a>(
     for tx in transactions {
         info!("");
         if let Some(druid_info) = &tx.druid_info {
-            let ins = construct_tx_ins_address(tx);
+            let ins = construct_tx_ins_address(tx.version, &tx.inputs, &tx.outputs);
 
             // Ensure match with passed DRUID
             if druid_info.druid == druid {
@@ -63,6 +63,7 @@ mod tests {
 
     use super::*;
     use crate::crypto::sign_ed25519::{self as sign};
+    use crate::primitives::address::P2PKHAddress;
     use crate::primitives::asset::{Asset, ItemAsset, TokenAmount};
     use crate::primitives::druid::{DdeValues, DruidExpectation};
     use crate::primitives::transaction::*;
@@ -72,17 +73,16 @@ mod tests {
     /// Util function to create valid DDE asset tx's
     fn create_dde_txs() -> Vec<Transaction> {
         let druid = "VALUE".to_owned();
-        let tx_input = construct_payment_tx_ins(vec![]);
-        let from_addr = construct_tx_ins_address(&tx_input);
+        let from_addr = construct_tx_ins_address(TxVersion::V6, &[], &[]);
 
-        let (pk, sk) = sign::gen_keypair().unwrap();
+        let (pk, sk) = sign::gen_test_keypair(0).unwrap();
         let prev_out = OutPoint::placeholder();
         let mut key_material = BTreeMap::new();
         key_material.insert(prev_out, (pk, sk));
 
         // Alice
         let amount = TokenAmount(10);
-        let alice_addr = "3333".to_owned();
+        let alice_addr = P2PKHAddress::placeholder_indexed(0).to_string();
         let alice_asset = Asset::Token(amount);
 
         // Bob
@@ -91,7 +91,7 @@ mod tests {
             amount: 1,
             genesis_hash: None,
         });
-        let bob_addr = "22222".to_owned();
+        let bob_addr = P2PKHAddress::placeholder_indexed(1).to_string();
 
         // TxOuts
         let token_tx_out = TxOut {
@@ -121,6 +121,7 @@ mod tests {
         ];
 
         // Txs
+        let tx_input = vec![];
         let alice_druid_info = DdeValues {
             druid: druid.clone(),
             participants: 2,
@@ -149,26 +150,22 @@ mod tests {
         let payment = TokenAmount(11);
         let druid = "VALUE".to_owned();
 
-        let tx_input = construct_payment_tx_ins(vec![]);
-        let from_addr = construct_tx_ins_address(&tx_input);
+        let from_addr = construct_tx_ins_address(TxVersion::V6, &[], &[]);
 
-        let alice_addr = "1111".to_owned();
-        let bob_addr = "00000".to_owned();
+        let alice_addr = P2PKHAddress::placeholder_indexed(0).to_string();
+        let bob_addr = P2PKHAddress::placeholder_indexed(1).to_string();
 
-        let sender_address_excess = "11112".to_owned();
+        let sender_address_excess = P2PKHAddress::placeholder_indexed(2).to_string();
         let mut key_material = BTreeMap::new();
 
         // Act
         //
         let send_tx = {
-            let tx_ins = {
-                // constructors with enough money for amount and excess, caller responsibility.
-                construct_payment_tx_ins(vec![])
-            };
+            let tx_ins = vec![];
             let excess_tx_out =
                 TxOut::new_token_amount(sender_address_excess, amount - payment, None);
             
-            let (pk, sk) = sign::gen_keypair().unwrap();
+            let (pk, sk) = sign::gen_test_keypair(0).unwrap();
             let prev_out = OutPoint::placeholder();
             key_material.insert(prev_out, (pk, sk));
 
@@ -204,11 +201,7 @@ mod tests {
         };
 
         let recv_tx = {
-            let tx_ins = {
-                // constructors with enough money for amount and excess, caller responsibility.
-                let tx_ins_constructor = vec![];
-                construct_payment_tx_ins(tx_ins_constructor)
-            };
+            let tx_ins = vec![];
             let expectation = DruidExpectation {
                 from: from_addr,
                 to: bob_addr,

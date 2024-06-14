@@ -1,6 +1,6 @@
 #![allow(unused)]
 use crate::constants::*;
-use crate::crypto::sha3_256;
+use crate::crypto::{sha3_256, sign_ed25519};
 use crate::crypto::sign_ed25519::{
     self as sign, PublicKey, Signature, ED25519_PUBLIC_KEY_LEN, ED25519_SIGNATURE_LEN,
 };
@@ -58,7 +58,7 @@ pub fn tx_is_valid<'a>(
 
         
         // Ensure the transaction is in the `UTXO` set
-        let tx_out_point = match tx_in.previous_out.as_ref() {
+        let tx_out_point = match tx_in.find_previous_out() {
             Some(v) => v,
             None => {
                 error!("TRANSACTION DOESN'T CONTAIN PREVIOUS OUTPOINT");
@@ -83,20 +83,18 @@ pub fn tx_is_valid<'a>(
         let tx_out_pk = tx_out.script_public_key.as_ref();
         let tx_out_hash = construct_tx_in_signable_hash(tx_out_point);
         let full_tx_hash = construct_tx_in_out_signable_hash(
-            &tx_in.previous_out.as_ref().unwrap(), &tx.outputs);
+            tx_in.find_previous_out().unwrap(), &tx.outputs);
 
         debug!("full_tx_hash: {:?}", full_tx_hash);
 
-        if let Some(pk) = tx_out_pk {
-            // Check will need to include other signature types here
-            if !tx_has_valid_p2pkh_sig(&tx_in.script_signature, &full_tx_hash, pk)
-                && !tx_has_valid_p2sh_script(&tx_in.script_signature, pk)
-            {
-                error!("INVALID SIGNATURE OR SCRIPT TYPE");
-                return false;
-            }
-        } else {
-            return false;
+        match (tx_out_pk, tx_in) {
+            (Some(pk), TxIn::P2PKH(p2pkh)) => {
+                if !tx_has_valid_p2pkh_sig(p2pkh, &full_tx_hash, pk) {
+                    error!("INVALID P2PKH SIGNATURE");
+                    return false;
+                }
+            },
+            _ => return false,
         }
 
         let asset = tx_out.value.clone().with_fixed_hash(tx_out_point);
@@ -297,30 +295,21 @@ pub fn match_p2pkh_script(
 ///
 /// * `script`          - Script to validate
 /// * `outpoint_hash`   - Hash of the corresponding outpoint
-/// * `tx_out_pub_key`  - Public key of the previous tx_out
+/// * `address`         - Receiver address from the previous TxOut
 // TODO: The last two operands should be converted to the corresponding types
-fn tx_has_valid_p2pkh_sig(script: &Script, outpoint_hash: &str, tx_out_pub_key: &str) -> bool {
-    debug!("script: {:?}", script);
-
-    if let Some((b, _, _, h)) = match_p2pkh_script(script) {
-        debug!("b: {:?}, h: {:?}", b, h);
-
-        // For legacy reasons, the hashed data is the hex representation of the data rather than
-        // the data itself.
-        let h_hex = hex::encode(h);
-        let b_hex = hex::encode(b);
-
-        if h_hex == tx_out_pub_key && b_hex == outpoint_hash && script.interpret() {
-            return true;
-        }
+fn tx_has_valid_p2pkh_sig(
+    input: &P2PKHTxIn,
+    outpoint_hash: &str,
+    address: &str,
+) -> bool {
+    if construct_address(&input.public_key) == address &&
+        sign_ed25519::verify_detached(
+            &input.signature, outpoint_hash.as_bytes(), &input.public_key) {
+        return true;
     }
 
     trace!(
-        "Invalid P2PKH script: {:?} tx_out_pub_key: {}",
-        script,
-        tx_out_pub_key
-    );
-
+        "Invalid P2PKH script: {input:?} outpoint_hash=\"{outpoint_hash}\", address=\"{address}\"");
     false
 }
 
@@ -369,6 +358,7 @@ fn address_has_valid_length(address: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::convert::TryInto;
     use std::vec;
 
     use super::*;
@@ -2704,7 +2694,7 @@ mod tests {
 
     /// Util function to create p2pkh TxIns
     fn create_multisig_tx_ins(tx_values: Vec<TxConstructor>, m: usize) -> Vec<TxIn> {
-        let mut tx_ins = Vec::new();
+        /*let mut tx_ins = Vec::new();
 
         for entry in tx_values {
             let mut new_tx_in = TxIn::new();
@@ -2718,12 +2708,13 @@ mod tests {
             tx_ins.push(new_tx_in);
         }
 
-        tx_ins
+        tx_ins*/
+        todo!()
     }
 
     /// Util function to create multisig member TxIns
     fn create_multisig_member_tx_ins(tx_values: Vec<TxConstructor>) -> Vec<TxIn> {
-        let mut tx_ins = Vec::new();
+        /*let mut tx_ins = Vec::new();
 
         for entry in tx_values {
             let mut new_tx_in = TxIn::new();
@@ -2738,7 +2729,8 @@ mod tests {
             tx_ins.push(new_tx_in);
         }
 
-        tx_ins
+        tx_ins*/
+        todo!()
     }
 
     #[test]
@@ -2771,7 +2763,7 @@ mod tests {
     #[test]
     /// Checks whether addresses are validated correctly
     fn test_validate_addresses_correctly() {
-        let (pk, _) = sign::gen_keypair().unwrap();
+        let (pk, _) = sign::gen_test_keypair(0).unwrap();
         let address = construct_address(&pk);
 
         assert!(address_has_valid_length(&address));
@@ -2782,7 +2774,7 @@ mod tests {
     #[test]
     /// Checks that correct member multisig scripts are validated as such
     fn test_pass_member_multisig_valid() {
-        let (pk, sk) = sign::gen_keypair().unwrap();
+        let (pk, sk) = sign::gen_test_keypair(0).unwrap();
         let t_hash = TxHash::placeholder();
         let signature = sign::sign_detached(hex::encode(t_hash.as_ref()).as_bytes(), &sk);
 
@@ -2794,14 +2786,15 @@ mod tests {
 
         let tx_ins = create_multisig_member_tx_ins(vec![tx_const]);
 
-        assert_eq!(tx_ins[0].clone().script_signature.interpret_full(), Ok(()));
+        //assert_eq!(tx_ins[0].clone().script_signature.interpret_full(), Ok(()));
+        todo!()
     }
 
     #[test]
     /// Checks that incorrect member multisig scripts are validated as such
     fn test_fail_member_multisig_invalid() {
-        let (_pk, sk) = sign::gen_keypair().unwrap();
-        let (pk, _sk) = sign::gen_keypair().unwrap();
+        let (_pk, sk) = sign::gen_test_keypair(0).unwrap();
+        let (pk, _sk) = sign::gen_test_keypair(1).unwrap();
         let t_hash = TxHash::placeholder();
         let signature = sign::sign_detached(t_hash.as_ref(), &sk);
 
@@ -2813,33 +2806,37 @@ mod tests {
 
         let tx_ins = create_multisig_member_tx_ins(vec![tx_const]);
 
-        assert_eq!(tx_ins[0].clone().script_signature.interpret_full(), Err(ScriptError::LastEntryIsZero));
+        //assert_eq!(tx_ins[0].clone().script_signature.interpret_full(), Err(ScriptError::LastEntryIsZero));
+        todo!()
     }
 
     #[test]
     /// Checks that correct p2pkh transaction signatures are validated as such
     fn test_pass_p2pkh_sig_valid() {
-        let (pk, sk) = sign::gen_keypair().unwrap();
+        let (pk, sk) = sign::gen_test_keypair(0).unwrap();
         let outpoint = OutPoint::placeholder();
-        let mut key_material = BTreeMap::new();
-        key_material.insert(outpoint.clone(), (pk, sk));
 
-        let tx_const = TxConstructor {
-            previous_out: outpoint,
-            signatures: vec![],
-            pub_keys: vec![pk],
-        };
+        let key_material = BTreeMap::from([
+            (outpoint.clone(), (pk.clone(), sk.clone())),
+        ]);
 
-        let tx_outs = vec![];
-        let mut tx_ins = construct_payment_tx_ins(vec![tx_const]);
-        tx_ins = update_input_signatures(&tx_ins, &tx_outs, &key_material);
+        let tx_outs = [];
+        let tx_const = [TxInConstructor::P2PKH {
+            previous_out: &outpoint,
+            public_key: &pk,
+            secret_key: &sk,
+        }];
+        let tx_ins = update_input_signatures(
+            &tx_const,
+            &tx_outs,
+            &key_material);
 
         let hash_to_sign = construct_tx_in_out_signable_hash(
-            &tx_ins[0].previous_out.as_ref().unwrap(), &tx_outs);
+            &outpoint, &tx_outs);
         let tx_out_pk = construct_address(&pk);
 
         assert!(tx_has_valid_p2pkh_sig(
-            &tx_ins[0].script_signature,
+            (&tx_ins[0]).try_into().unwrap(),
             &hash_to_sign,
             &tx_out_pk
         ));
@@ -2848,24 +2845,32 @@ mod tests {
     #[test]
     /// Checks that invalid p2pkh transaction signatures are validated as such
     fn test_fail_p2pkh_sig_invalid() {
-        let (pk, sk) = sign::gen_keypair().unwrap();
-        let (second_pk, _s) = sign::gen_keypair().unwrap();
+        let (pk, _sk) = sign::gen_test_keypair(0).unwrap();
+        let (second_pk, second_sk) = sign::gen_test_keypair(1).unwrap();
+
         let outpoint = OutPoint::placeholder();
 
-        let hash_to_sign = construct_tx_in_signable_hash(&outpoint);
-        let signature = sign::sign_detached(hash_to_sign.as_bytes(), &sk);
+        let key_material = BTreeMap::from([
+            (outpoint.clone(), (second_pk.clone(), second_sk.clone())),
+        ]);
 
-        let tx_const = TxConstructor {
-            previous_out: outpoint,
-            signatures: vec![signature],
-            pub_keys: vec![second_pk],
-        };
+        let tx_outs = [];
+        let tx_const = [TxInConstructor::P2PKH {
+            previous_out: &outpoint,
+            public_key: &second_pk,
+            secret_key: &second_sk,
+        }];
+        let tx_ins = update_input_signatures(
+            &tx_const,
+            &tx_outs,
+            &key_material);
 
-        let tx_ins = construct_payment_tx_ins(vec![tx_const]);
+        let hash_to_sign = construct_tx_in_out_signable_hash(
+            &outpoint, &tx_outs);
         let tx_out_pk = construct_address(&pk);
 
         assert!(!tx_has_valid_p2pkh_sig(
-            &tx_ins[0].script_signature,
+            (&tx_ins[0]).try_into().unwrap(),
             &hash_to_sign,
             &tx_out_pk
         ));
@@ -2874,7 +2879,7 @@ mod tests {
     #[test]
     /// Checks that invalid p2pkh transaction signatures are validated as such
     fn test_fail_p2pkh_sig_script_empty() {
-        let (pk, sk) = sign::gen_keypair().unwrap();
+        /*let (pk, sk) = sign::gen_keypair().unwrap();
         let outpoint = OutPoint::placeholder();
 
         let hash_to_sign = construct_tx_in_signable_hash(&outpoint);
@@ -2902,13 +2907,14 @@ mod tests {
             &tx_ins[0].script_signature,
             &hash_to_sign,
             &tx_out_pk
-        ));
+        ));*/
+        todo!("this could be implemented for upgraded v6 transactions?")
     }
 
     #[test]
     /// Checks that invalid p2pkh transaction signatures are validated as such
     fn test_fail_p2pkh_sig_script_invalid_struct() {
-        let (pk, sk) = sign::gen_keypair().unwrap();
+        /*let (pk, sk) = sign::gen_test_keypair(0).unwrap();
         let outpoint = OutPoint::placeholder();
 
         let hash_to_sign = construct_tx_in_signable_hash(&outpoint);
@@ -2930,11 +2936,11 @@ mod tests {
                 signature.clone(),
                 pk.clone(),
             );
-            /*new_tx_in.script_signature = Script::new();
-            new_tx_in
-                .script_signature
-                .stack
-                .push(StackEntry::Bytes("".as_bytes().to_vec()));*/
+            //new_tx_in.script_signature = Script::new();
+            //new_tx_in
+            //    .script_signature
+            //    .stack
+            //    .push(StackEntry::Bytes("".as_bytes().to_vec()));
             new_tx_in.previous_out = Some(entry.previous_out);
 
             tx_ins.push(new_tx_in);
@@ -2946,13 +2952,14 @@ mod tests {
             &tx_ins[0].script_signature,
             &hash_to_sign,
             &tx_out_pk
-        ));
+        ));*/
+        todo!("this is basically the same as test_fail_p2pkh_sig_invalid?!?")
     }
 
     #[test]
     /// Checks that correct multisig validation signatures are validated as such
     fn test_pass_multisig_validation_valid() {
-        let (first_pk, first_sk) = sign::gen_keypair().unwrap();
+        /*let (first_pk, first_sk) = sign::gen_keypair().unwrap();
         let (second_pk, second_sk) = sign::gen_keypair().unwrap();
         let (third_pk, third_sk) = sign::gen_keypair().unwrap();
         let check_data = TxHash::placeholder();
@@ -2970,7 +2977,8 @@ mod tests {
         let tx_ins = create_multisig_tx_ins(vec![tx_const], m);
 
         assert_eq!(tx_ins[0].clone().script_signature.interpret_full(), Ok(()),
-                   "multisig script_signature invalid: {:?}", tx_ins[0].script_signature);
+                   "multisig script_signature invalid: {:?}", tx_ins[0].script_signature);*/
+        todo!()
     }
 
     #[test]
@@ -3001,23 +3009,19 @@ mod tests {
         //
         // Arrange
         //
-        let (pk, sk) = sign::gen_keypair().unwrap();
+        let (pk, sk) = sign::gen_test_keypair(0).unwrap();
         let tx_outpoint = OutPoint::placeholder();
         let script_public_key = construct_address(&pk);
         let tx_in_previous_out =
             TxOut::new_token_amount(script_public_key.clone(), TokenAmount(5), locktime);
         let ongoing_tx_outs = vec![tx_in_previous_out.clone()];
-        let tx_in = TxIn {
-            script_signature: Script::new(),
-            previous_out: Some(tx_outpoint.clone()),
-        };
 
         let valid_bytes = construct_tx_in_out_signable_hash(
-            &tx_in.previous_out.as_ref().unwrap(), &ongoing_tx_outs.clone());
+            &tx_outpoint, &ongoing_tx_outs);
         let valid_sig = sign::sign_detached(valid_bytes.as_bytes(), &sk);
 
         // Test cases:
-        let inputs = [
+        /*let inputs = [
             // 0. Happy case: valid test
             (
                 Script::build(&[
@@ -3058,7 +3062,8 @@ mod tests {
             actual_result.push(result);
         }
 
-        actual_result == inputs.iter().map(|(_, e)| *e).collect::<Vec<bool>>()
+        actual_result == inputs.iter().map(|(_, e)| *e).collect::<Vec<bool>>()*/
+        todo!()
     }
 
     #[test]
@@ -3223,7 +3228,7 @@ mod tests {
     #[test]
     /// Checks that incorrect member interpret scripts are validated as such
     fn test_fail_interpret_valid() {
-        let (_pk, sk) = sign::gen_keypair().unwrap();
+        /*let (_pk, sk) = sign::gen_keypair().unwrap();
         let (pk, _sk) = sign::gen_keypair().unwrap();
         let t_hash = TxHash::placeholder();
         let signature = sign::sign_detached(t_hash.as_ref(), &sk);
@@ -3236,13 +3241,14 @@ mod tests {
 
         let tx_ins = create_multisig_member_tx_ins(vec![tx_const]);
 
-        assert_eq!(tx_ins[0].clone().script_signature.interpret_full(), Err(ScriptError::LastEntryIsZero));
+        assert_eq!(tx_ins[0].clone().script_signature.interpret_full(), Err(ScriptError::LastEntryIsZero));*/
+        todo!()
     }
 
     #[test]
     /// Checks that interpret scripts are validated as such
     fn test_pass_interpret_valid() {
-        let (pk, sk) = sign::gen_keypair().unwrap();
+        /*let (pk, sk) = sign::gen_keypair().unwrap();
         let t_hash = TxHash::placeholder();
         let signature = sign::sign_detached(hex::encode(t_hash.as_ref()).as_bytes(), &sk);
 
@@ -3254,6 +3260,7 @@ mod tests {
 
         let tx_ins = create_multisig_member_tx_ins(vec![tx_const]);
 
-        assert_eq!(tx_ins[0].clone().script_signature.interpret_full(), Ok(()));
+        assert_eq!(tx_ins[0].clone().script_signature.interpret_full(), Ok(()));*/
+        todo!()
     }
 }

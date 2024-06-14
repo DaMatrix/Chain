@@ -241,120 +241,6 @@ enum V6OpCodes {
     OP_NOP10 = 0xb9,
 }
 
-mod script_pattern {
-    use super::*;
-    use crate::utils::array_match_slice;
-
-    enum ScriptPattern<'a> {
-        Coinbase {
-            block_number: u64,
-        },
-        Create {
-            block_number: u64,
-            asset_hash: &'a str,
-            signature: &'a V6Signature,
-            public_key: &'a V6PublicKey,
-        },
-        P2PKH {
-            check_data: &'a str,
-            signature: &'a V6Signature,
-            public_key: &'a V6PublicKey,
-            public_key_hash: &'a str,
-        },
-    }
-
-    /// Checks if a script matches any of the known v6 script patterns and extracts the relevant fields.
-    ///
-    /// ### Arguments
-    ///
-    /// * `script`      - Script to match
-    fn match_v6_script(script: &V6Script) -> Result<ScriptPattern, V6Script> {
-        if let Some(block_number) = match_coinbase_script(script) {
-            Ok(ScriptPattern::Coinbase { block_number })
-        } else if let Some((check_data, signature, public_key, public_key_hash)) = match_p2pkh_script(script) {
-            Ok(ScriptPattern::P2PKH { check_data, signature, public_key, public_key_hash })
-        } else if let Some((block_number, asset_hash, signature, public_key)) = match_create_script(script) {
-            Ok(ScriptPattern::Create { block_number, asset_hash, signature, public_key })
-        } else {
-            Err(script.clone())
-        }
-    }
-
-    /// Checks if a script matches the coinbase pattern and extracts the relevant fields.
-    ///
-    /// ### Arguments
-    ///
-    /// * `script`      - Script to match
-    fn match_coinbase_script(
-        script: &V6Script,
-    ) -> Option<u64> {
-        if let Some([
-                    V6StackEntry::Num(block_number),
-                    ]) = array_match_slice(&script.to_entries().ok()?) {
-            Some(block_number)
-        } else {
-            None
-        }
-    }
-
-    /// Checks if a script matches the item creation pattern and extracts the relevant fields.
-    ///
-    /// ### Arguments
-    ///
-    /// * `script`      - Script to match
-    fn match_create_script(
-        script: &V6Script,
-    ) -> Option<(u64, &str, &V6Signature, &V6PublicKey)> {
-        if let Some([
-                    V6StackEntry::Op(V6OpCodes::OP_CREATE),
-                    V6StackEntry::Num(block_number),
-                    V6StackEntry::Op(V6OpCodes::OP_DROP),
-                    V6StackEntry::Bytes(b),
-                    V6StackEntry::Signature(signature),
-                    V6StackEntry::PubKey(public_key),
-                    V6StackEntry::Op(V6OpCodes::OP_CHECKSIG),
-                    ]) = array_match_slice(&script.to_entries().ok()?) {
-            Some((
-                block_number,
-                b,
-                signature,
-                public_key,
-            ))
-        } else {
-            None
-        }
-    }
-
-    /// Checks if a script matches the P2PKH pattern and extracts the relevant fields.
-    ///
-    /// ### Arguments
-    ///
-    /// * `script`      - Script to match
-    fn match_p2pkh_script(
-        script: &V6Script,
-    ) -> Option<(&str, &V6Signature, &V6PublicKey, &str)> {
-        if let Some([
-                    V6StackEntry::Bytes(check_data),
-                    V6StackEntry::Signature(signature),
-                    V6StackEntry::PubKey(public_key),
-                    V6StackEntry::Op(V6OpCodes::OP_DUP),
-                    V6StackEntry::Op(V6OpCodes::OP_HASH256),
-                    V6StackEntry::Bytes(public_key_hash),
-                    V6StackEntry::Op(V6OpCodes::OP_EQUALVERIFY),
-                    V6StackEntry::Op(V6OpCodes::OP_CHECKSIG),
-                    ]) = array_match_slice(&script.to_entries().ok()?) {
-            Some((
-                check_data,
-                signature,
-                public_key,
-                public_key_hash,
-            ))
-        } else {
-            None
-        }
-    }
-}
-
 make_error_type!(pub enum FromV6Error {
     BadVersion(version: u64); "not a v6 transaction: {version}",
     DataRemaining(remaining: usize);
@@ -744,8 +630,8 @@ fn downgrade_v6_txin(old: &TxIn, new_txouts: &[TxOut]) -> Result<V6TxIn, ToV6Err
                     V6StackEntry::Num(create.block_number),
                     V6StackEntry::Op(V6OpCodes::OP_DROP),
                     V6StackEntry::Bytes(hex::encode(&create.asset_hash)),
-                    V6StackEntry::Signature(create.signature.into()),
-                    V6StackEntry::PubKey(create.public_key.into()),
+                    V6StackEntry::Signature((&create.signature).into()),
+                    V6StackEntry::PubKey((&create.public_key).into()),
                     V6StackEntry::Op(V6OpCodes::OP_CHECKSIG),
                 ]
             },
@@ -754,13 +640,13 @@ fn downgrade_v6_txin(old: &TxIn, new_txouts: &[TxOut]) -> Result<V6TxIn, ToV6Err
             previous_out: Some(downgrade_v6_outpoint(&p2pkh.previous_out)?),
             script_signature: {
                 let check_data = find_v6_p2pkh_check_data(p2pkh, new_txouts)
-                    .ok_or_else(ToV6Error::BadP2PKHSignature)?;
+                    .ok_or(ToV6Error::BadP2PKHSignature)?;
 
                 V6Script {
                     stack: vec![
                         V6StackEntry::Bytes(check_data),
-                        V6StackEntry::Signature(p2pkh.signature.into()),
-                        V6StackEntry::PubKey(p2pkh.public_key.into()),
+                        V6StackEntry::Signature((&p2pkh.signature).into()),
+                        V6StackEntry::PubKey((&p2pkh.public_key).into()),
                         V6StackEntry::Op(V6OpCodes::OP_DUP),
                         V6StackEntry::Op(V6OpCodes::OP_HASH256),
                         V6StackEntry::Bytes(hex::encode(sha3_256::digest(p2pkh.public_key.as_ref()))),
@@ -807,7 +693,9 @@ fn downgrade_v6_tx(old: &Transaction) -> Result<V6Transaction, ToV6Error> {
     
     Ok(V6Transaction {
         version: 6,
-        inputs: old.inputs.iter().map(downgrade_v6_txin).collect::<Result<Vec<_>, _>>()?,
+        inputs: old.inputs.iter()
+            .map(|tx_in| downgrade_v6_txin(tx_in, &old.outputs))
+            .collect::<Result<Vec<_>, _>>()?,
         outputs: old.outputs.iter().map(downgrade_v6_txout).collect::<Result<Vec<_>, _>>()?,
         fees: old.fees.iter().map(downgrade_v6_txout).collect::<Result<Vec<_>, _>>()?,
         druid_info: old.druid_info.as_ref().map(downgrade_v6_ddevalues).transpose()?,
@@ -916,6 +804,7 @@ mod tests {
     use super::*;
 
     use std::collections::BTreeMap;
+    use once_cell::sync::Lazy;
     use crate::constants::STANDARD_ADDRESS_LENGTH_BYTES;
     use crate::crypto::sign_ed25519;
     use crate::crypto::sign_ed25519::{PublicKey, SecretKey};
@@ -924,21 +813,25 @@ mod tests {
     use crate::utils::{script_utils, transaction_utils};
     use crate::utils::transaction_utils::ReceiverInfo;
 
-    fn test_construct_valid_inputs() -> (Vec<TxIn>, BTreeMap<OutPoint, (PublicKey, SecretKey)>) {
-        let (pk, sk) = sign_ed25519::gen_test_keypair(0);
-        let t_hash = "g48dda5bbe9171a6656206ec56c595c5";
-        let prev_out = OutPoint::new_from_hash(t_hash.parse().unwrap(), 0);
+    fn test_construct_valid_inputs() -> (Vec<TxInConstructor<'static>>, BTreeMap<OutPoint, (PublicKey, SecretKey)>) {
+        static KEYPAIR : Lazy<(PublicKey, SecretKey)> = Lazy::new(|| sign_ed25519::gen_test_keypair(0).unwrap());
+        static PREV_OUT : Lazy<OutPoint> = Lazy::new(|| {
+            let t_hash = "g48dda5bbe9171a6656206ec56c595c5";
+            OutPoint::new_from_hash(t_hash.parse().unwrap(), 0)
+        });
 
-        let mut key_material = BTreeMap::new();
-        key_material.insert(prev_out.clone(), (pk, sk));
+        let (pk, sk) = &*KEYPAIR;
+        let prev_out = &*PREV_OUT;
 
-        let tx_const = TxConstructor {
+        let key_material = BTreeMap::from([
+            ( prev_out.clone(), (pk.clone(), sk.clone()) ),
+        ]);
+
+        let tx_ins = vec![TxInConstructor::P2PKH {
             previous_out: prev_out,
-            signatures: vec![],
-            pub_keys: vec![pk],
-        };
-
-        let tx_ins = transaction_utils::construct_payment_tx_ins(vec![tx_const]);
+            public_key: pk,
+            secret_key: sk,
+        }];
         (tx_ins, key_material)
     }
 
@@ -1095,15 +988,12 @@ mod tests {
         let mut key_material = BTreeMap::new();
         key_material.insert(prev_out.clone(), (pk, sk.clone()));
 
-
-        let tx_1 = TxConstructor {
-            previous_out: prev_out,
-            signatures: vec![],
-            pub_keys: vec![pk],
-        };
-
         let token_amount = TokenAmount(400000);
-        let tx_ins_1 = transaction_utils::construct_payment_tx_ins(vec![tx_1]);
+        let tx_ins_1 = vec![TxInConstructor::P2PKH {
+            previous_out: &prev_out,
+            public_key: &pk,
+            secret_key: &sk,
+        }];
         let payment_tx_1 = transaction_utils::construct_payment_tx(
             tx_ins_1,
             ReceiverInfo {
@@ -1116,18 +1006,17 @@ mod tests {
         );
         let tx_1_hash = transaction_utils::construct_tx_hash(&payment_tx_1);
         let tx_1_out_p = OutPoint::new_from_hash(tx_1_hash.parse().unwrap(), 0);
-        key_material.insert(tx_1_out_p.clone(), (pk, sk));
+        key_material.insert(tx_1_out_p.clone(), (pk, sk.clone()));
 
         let expected = "0100000000000000012000000000000000673438646461356262653931373161363635363230366563353663353935633500000000080000000000000004000000400000000000000063653137663764316636373539643734326661363763343132343038363863633733393639383431336639313336393330623763383536366135336561663966010000004000000000000000ddb2e62a24f2004b1977afb82700a46121f6f0070c9ccaa24828c82c9806d39eb51921489f34c198861c8d19552324d9813a97e1c5de985db792e1df5914ed0a0200000020000000000000004a423a99c7d946e88da185f8f400e41cee388a95ecedc8603136de50aea12182000000002300000000000000500000000400000040000000000000003039653138346234363365356538643465666161336666353130663138343231633765353066653432666534646137623534353332636132303666333339626200000000350000000000000053000000010000000000000000000000801a0600000000000000000000000000014000000000000000393732653338613030616630323036393065313736663566613465653634613131653362643663626330303037633130666434626265326337356130313062640600000000000000000000000000000000";
         test_tx_matches_expected(&payment_tx_1, expected);
 
         // Second tx referencing first
-        let tx_2 = TxConstructor {
-            previous_out: tx_1_out_p.clone(),
-            signatures: vec![],
-            pub_keys: vec![pk],
-        };
-        let tx_ins_2 = transaction_utils::construct_payment_tx_ins(vec![tx_2]);
+        let tx_ins_2 = vec![TxInConstructor::P2PKH {
+            previous_out: &tx_1_out_p,
+            public_key: &pk,
+            secret_key: &sk,
+        }];
         let payment_tx_2 = transaction_utils::construct_payment_tx(
             tx_ins_2,
             ReceiverInfo {

@@ -7,7 +7,7 @@ use crate::primitives::{
 use crate::script::lang::Script;
 use crate::utils::transaction_utils::{construct_address, construct_tx_in_out_signable_hash};
 use std::collections::BTreeMap;
-use crate::primitives::transaction::TxHash;
+use crate::primitives::transaction::{P2PKHTxIn, TxHash};
 use crate::utils::Placeholder;
 
 /// Generate a transaction with valid Script values
@@ -61,10 +61,11 @@ pub fn generate_tx_with_ins_and_outs_assets(
         };
         let signable_hash = construct_tx_in_out_signable_hash(&tx_previous_out, &tx.outputs);
         let signature = sign::sign_detached(signable_hash.as_bytes(), &sk);
-        let tx_in = TxIn::new_from_input(
-            tx_previous_out.clone(),
-            Script::pay2pkh(hex::decode(&signable_hash).unwrap(), signature, pk),
-        );
+        let tx_in = TxIn::P2PKH(P2PKHTxIn {
+            previous_out: tx_previous_out.clone(),
+            public_key: pk,
+            signature,
+        });
         utxo_set.insert(tx_previous_out, tx_in_previous_out);
         tx.inputs.push(tx_in);
     }
