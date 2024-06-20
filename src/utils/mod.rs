@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+use std::convert::TryInto;
+use std::iter::FromIterator;
 
 use crate::constants::{D_DISPLAY_PLACES, TOTAL_TOKENS};
 use crate::primitives::asset::TokenAmount;
@@ -50,4 +52,48 @@ pub fn add_btreemap<E: Ord, T: Copy + std::ops::AddAssign>(
         m1.entry(key).and_modify(|e| *e += value).or_insert(value);
     });
     m1
+}
+
+trait ArrayFromIterator<E> : Sized {
+    type Error;
+
+    fn array_from_iter<I: IntoIterator<Item = E>>(iter: I) -> Result<Self, Self::Error>;
+}
+
+impl<T, const N: usize> ArrayFromIterator<T> for [T; N] {
+    type Error = Vec<T>;
+
+    fn array_from_iter<I: IntoIterator<Item=T>>(iter: I) -> Result<Self, Self::Error> {
+        iter.into_iter().collect::<Vec<T>>().try_into()
+    }
+}
+
+impl<T, E, const N: usize> ArrayFromIterator<Result<T, E>> for Result<[T; N], E> {
+    type Error = Vec<T>;
+
+    fn array_from_iter<I: IntoIterator<Item=Result<T, E>>>(iter: I) -> Result<Self, Self::Error> {
+        match iter.into_iter().collect::<Result<Vec<T>, E>>() {
+            Ok(vec) => vec.try_into().map(Ok),
+            Err(err) => Ok(Err(err)),
+        }
+    }
+}
+
+pub trait IntoArray {
+    type Item;
+
+    /// Alternative to `Iterator.collect()` which allows collecting the values directly into
+    /// an array.
+    ///
+    /// This is unfortunately required because there is no standard library implementation of
+    /// FromIterator for arbitrary array types, so we need to add our own trait for it.
+    fn into_array<T: ArrayFromIterator<Self::Item>>(self) -> Result<T, T::Error>;
+}
+
+impl<I: Iterator> IntoArray for I {
+    type Item = I::Item;
+
+    fn into_array<T: ArrayFromIterator<Self::Item>>(self) -> Result<T, T::Error> {
+        T::array_from_iter(self)
+    }
 }
