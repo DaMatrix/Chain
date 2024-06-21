@@ -225,6 +225,12 @@ impl OutPoint {
     }
 }
 
+impl fmt::Display for OutPoint {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{}.{}", self.t_hash, self.n)
+    }
+}
+
 impl Placeholder for OutPoint {
     fn placeholder_indexed(index: u64) -> Self {
         OutPoint {
@@ -300,13 +306,15 @@ impl TxIn {
     }
 }
 
-/// The different kinds of transaction inputs.
+make_trivial_enum!(
+#[doc = "The different kinds of transaction inputs."]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TxInSort {
     Coinbase,
     Create,
     P2PKH,
 }
+all_variants=ALL_SORTS);
 
 /// An error which can occur when trying to convert a TxIn to a specific subtype.
 #[derive(Debug)]

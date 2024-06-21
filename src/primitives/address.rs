@@ -114,6 +114,16 @@ pub enum AnyAddress {
     Burn,
 }
 
+impl AnyAddress {
+    /// Identifies which sort of address this is.
+    pub fn sort(&self) -> AddressSort {
+        match self {
+            Self::P2PKH(_) => AddressSort::P2PKH,
+            Self::Burn => AddressSort::Burn,
+        }
+    }
+}
+
 impl Display for AnyAddress {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match self {
@@ -139,6 +149,16 @@ impl FromStr for AnyAddress {
         }
     }
 }
+
+make_trivial_enum!(
+#[doc = "The different kinds of addresses."]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AddressSort {
+    P2PKH,
+    //P2SH,
+    Burn,
+}
+all_variants=ALL_SORTS);
 
 /*---- TESTS ----*/
 

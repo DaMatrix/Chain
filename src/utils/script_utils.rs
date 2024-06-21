@@ -19,7 +19,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
 use std::thread::current;
 use tracing::{debug, error, info, trace};
-use crate::primitives::address::{AnyAddress, P2PKHAddress, ParseAddressError};
+use crate::primitives::address::{AddressSort, AnyAddress, P2PKHAddress, ParseAddressError};
 use crate::utils::array_match_slice_copy;
 
 use super::transaction_utils::construct_p2sh_address;
@@ -34,11 +34,91 @@ use super::transaction_utils::construct_p2sh_address;
 /// * `tx`                   - Transaction to verify
 /// * `current_block_number` - Current block number
 /// * `is_in_utxo`           - Function to check if a `TxOut` is in the UTXO set
+#[deprecated = "Use tx_is_valid_full"]
 pub fn tx_is_valid<'a>(
     tx: &Transaction,
     current_block_number: u64,
     is_in_utxo: impl Fn(&OutPoint) -> Option<&'a TxOut> + 'a,
 ) -> bool {
+    tx_is_valid_full(tx, current_block_number, is_in_utxo).is_ok()
+}
+
+make_error_type!(
+#[derive(PartialEq)]
+pub enum TxValidationError {
+    OnSpendInvalidMetadata; "ON-SPENDING NEEDS EMPTY METADATA AND NON-EMPTY DRS SPECIFICATION",
+
+    #[doc = "Indicates that one of the transaction's inputs isn't redeeming the value of a \
+             previous OutPoint"]
+    MissingPreviousOutPoint; "TRANSACTION DOESN'T CONTAIN PREVIOUS OUTPOINT",
+
+    #[doc = "Indicates that one of the transaction's inputs is redeeming an OutPoint which does \
+             not exist or has already been spent."]
+    PreviousOutPointNotInUTXO(
+        previous_out: OutPoint,
+    ); "OutPoint {previous_out} is not in the UTXO table",
+
+    #[doc = "Indicates that one of the transaction's inputs is redeeming an OutPoint which is \
+             still locked."]
+    LocktimeNotMet {
+        previous_out: OutPoint,
+        output_locktime: u64,
+        current_block_number: u64,
+    }; "OutPoint {previous_out} is still locked: its locktime is {output_locktime} but the current \
+        block number is {current_block_number}",
+
+    #[doc = "Indicates that one of the transaction's inputs is redeeming an OutPoint whose \
+             script_public_key does not seem to represent a valid payment address."]
+    InvalidScriptPublicKey {
+        previous_out: OutPoint,
+        cause: ParseAddressError,
+    }; "OutPoint {previous_out}'s script_public_key is invalid: {cause}"; cause,
+
+    #[doc = "Indicates that one of the transaction's inputs is intended to redeem OutPoints of one \
+             sort, but the OutPoint refers to a transaction output of a different sort."]
+    IncompatibleOutput {
+        previous_out: OutPoint,
+        output_sort: AddressSort,
+        input_sort: TxInSort,
+    }; "OutPoint {previous_out} refers to a {output_sort} output; it cannot be redeemed by a \
+        {input_sort} TxIn",
+
+    #[doc = "Indicates that one of the transaction's P2PKH inputs is invalid for redeeming the \
+             corresponding OutPoint."]
+    P2PKHInvalid(
+        cause: P2PKHValidationError,
+    ); "P2PKH input validation failed: {cause}"; cause,
+
+    #[doc = "Indicates that one of the transaction's outputs refers to an invalid address."]
+    OutputAddressInvalid(
+        cause: ParseAddressError,
+    ); "Output/fee address is invalid: {cause}"; cause,
+
+    #[doc = "Indicates that the total value of the transaction outputs differs from the total \
+             value of the transaction's inputs."]
+    InconsistentInputAndOutputValue {
+        input_value: AssetValues,
+        output_value: AssetValues,
+    }; "Transaction input and output values are inconsistent!\n  \
+        Total input value: {input_value:#?}\n  \
+        Total output value: {output_value:#?}",
+});
+
+/// Verifies that all incoming transactions are allowed to be spent. Returns false if a single
+/// transaction doesn't verify
+///
+/// TODO: Currently assumes p2pkh and p2sh, abstract to all tx types
+///
+/// ### Arguments
+///
+/// * `tx`                   - Transaction to verify
+/// * `current_block_number` - Current block number
+/// * `is_in_utxo`           - Function to check if a `TxOut` is in the UTXO set
+pub fn tx_is_valid_full<'a>(
+    tx: &Transaction,
+    current_block_number: u64,
+    is_in_utxo: impl Fn(&OutPoint) -> Option<&'a TxOut> + 'a,
+) -> Result<(), TxValidationError> {
     let mut tx_ins_spent: AssetValues = Default::default();
     // TODO: Add support for `Data` asset variant
     // `Item` assets MUST have an a DRS value associated with them when they are getting on-spent
@@ -52,31 +132,24 @@ pub fn tx_is_valid<'a>(
         (out.value.is_item()
             && (out.value.get_genesis_hash().is_none() || out.value.get_metadata().is_some()))
     }) {
-        error!("ON-SPENDING NEEDS EMPTY METADATA AND NON-EMPTY DRS SPECIFICATION");
-        return false;
+        return Err(TxValidationError::OnSpendInvalidMetadata);
     }
 
     for tx_in in &tx.inputs {
         // Ensure the transaction is in the `UTXO` set
-        let tx_out_point = match tx_in.find_previous_out() {
-            Some(v) => v,
-            None => {
-                error!("TRANSACTION DOESN'T CONTAIN PREVIOUS OUTPOINT");
-                return false;
-            }
-        };
+        let tx_out_point = tx_in.find_previous_out()
+            .ok_or(TxValidationError::MissingPreviousOutPoint)?;
 
-        let tx_out = if let Some(tx_out) = is_in_utxo(tx_out_point) {
-            tx_out
-        } else {
-            error!("UTXO DOESN'T CONTAIN THIS TX");
-            return false;
-        };
+        let tx_out = is_in_utxo(tx_out_point)
+            .ok_or_else(|| TxValidationError::PreviousOutPointNotInUTXO(tx_out_point.clone()))?;
 
         // Check locktime
         if tx_out.locktime > current_block_number {
-            error!("LOCKTIME NOT MET");
-            return false;
+            return Err(TxValidationError::LocktimeNotMet {
+                previous_out: tx_out_point.clone(),
+                output_locktime: tx_out.locktime,
+                current_block_number,
+            });
         }
 
         // At this point `TxIn` will be valid
@@ -85,10 +158,10 @@ pub fn tx_is_valid<'a>(
             None => AnyAddress::Burn,
             Some(text_address) => match AnyAddress::from_str(text_address) {
                 Ok(address) => address,
-                Err(err) => {
-                    error!("INVALID script_public_key: {:?}", err);
-                    return false;
-                },
+                Err(err) => return Err(TxValidationError::InvalidScriptPublicKey {
+                    previous_out: tx_out_point.clone(),
+                    cause: err,
+                }),
             },
         };
 
@@ -100,18 +173,13 @@ pub fn tx_is_valid<'a>(
 
         match (&tx_out_address, tx_in) {
             (AnyAddress::P2PKH(address), TxIn::P2PKH(p2pkh)) =>
-                match tx_has_valid_p2pkh_sig(p2pkh, &full_tx_hash, address) {
-                    Ok(()) => (),
-                    Err(err) => {
-                        // TODO: propagate error
-                        error!("INVALID P2PKH SIGNATURE: {:?}", err);
-                        return false;
-                    }
-                },
-            _ => {
-                error!("OUTPUT ADDRESS {tx_out_address} IS INCOMPATIBLE WITH TxIn {tx_in:?}");
-                return false;
-            },
+                tx_has_valid_p2pkh_sig(p2pkh, &full_tx_hash, address)
+                    .map_err(TxValidationError::P2PKHInvalid)?,
+            _ => return Err(TxValidationError::IncompatibleOutput {
+                previous_out: tx_out_point.clone(),
+                output_sort: tx_out_address.sort(),
+                input_sort: tx_in.sort(),
+            }),
         }
 
         let asset = tx_out.value.clone().with_fixed_hash(tx_out_point);
@@ -120,10 +188,10 @@ pub fn tx_is_valid<'a>(
 
     debug!(
         "txs are valid: {:?}",
-        tx_outs_are_valid(&tx.outputs, &tx.fees, tx_ins_spent.clone())
+        tx_outs_are_valid_full(&tx.outputs, &tx.fees, tx_ins_spent.clone())
     );
 
-    tx_outs_are_valid(&tx.outputs, &tx.fees, tx_ins_spent)
+    tx_outs_are_valid_full(&tx.outputs, &tx.fees, tx_ins_spent)
 }
 
 /// Verifies that the outgoing `TxOut`s are valid. Returns false if a single
@@ -135,16 +203,27 @@ pub fn tx_is_valid<'a>(
 ///
 /// * `tx_outs`      - `TxOut`s to verify
 /// * `tx_ins_spent` - Total amount spendable from `TxIn`s
+#[deprecated = "Use tx_outs_are_valid_full"]
 pub fn tx_outs_are_valid(tx_outs: &[TxOut], fees: &[TxOut], tx_ins_spent: AssetValues) -> bool {
+    tx_outs_are_valid_full(tx_outs, fees, tx_ins_spent).is_ok()
+}
+
+/// Verifies that the outgoing `TxOut`s are valid. Returns false if a single
+/// transaction doesn't verify.
+///
+/// TODO: Abstract to data assets
+///
+/// ### Arguments
+///
+/// * `tx_outs`      - `TxOut`s to verify
+/// * `tx_ins_spent` - Total amount spendable from `TxIn`s
+pub fn tx_outs_are_valid_full(tx_outs: &[TxOut], fees: &[TxOut], tx_ins_spent: AssetValues) -> Result<(), TxValidationError> {
     let mut tx_outs_spent: AssetValues = Default::default();
 
     for tx_out in tx_outs {
         // Addresses must have valid length
         if let Some(addr) = &tx_out.script_public_key {
-            if !address_has_valid_length(addr) {
-                trace!("Address has invalid length");
-                return false;
-            }
+            AnyAddress::from_str(addr.as_str()).map_err(TxValidationError::OutputAddressInvalid)?;
         }
 
         tx_outs_spent.update_add(&tx_out.value);
@@ -154,17 +233,21 @@ pub fn tx_outs_are_valid(tx_outs: &[TxOut], fees: &[TxOut], tx_ins_spent: AssetV
     for fee in fees {
         // Addresses must have valid length
         if let Some(addr) = &fee.script_public_key {
-            if !address_has_valid_length(addr) {
-                trace!("Address has invalid length");
-                return false;
-            }
+            AnyAddress::from_str(addr.as_str()).map_err(TxValidationError::OutputAddressInvalid)?;
         }
 
         tx_outs_spent.update_add(&fee.value);
     }
 
     // Ensure that the `TxIn`s correlate with the `TxOut`s
-    tx_outs_spent.is_equal(&tx_ins_spent)
+    if !tx_outs_spent.is_equal(&tx_ins_spent) {
+        return Err(TxValidationError::InconsistentInputAndOutputValue {
+            input_value: tx_ins_spent,
+            output_value: tx_outs_spent,
+        });
+    }
+
+    Ok(())
 }
 
 pub enum MatchV6Script<'a> {
@@ -248,35 +331,22 @@ pub fn match_create_script(
 }
 
 make_error_type!(
-#[derive(Eq, PartialEq)]
-pub enum TxValidationError {
+#[derive(PartialEq)]
+pub enum CreateValidationError {
     // CreateItem input validation errors
-    CreateItemMetadataTooLarge {
+    ItemMetadataTooLarge {
         metadata_size: usize,
     }; "Item metadata is too large: {metadata_size}",
-    CreateItemHashMismatch {
+    ItemHashMismatch {
         asset_hash: String,
         check_data: String,
     }; "Item asset hash \"{asset_hash}\" doesn't match creation script check_data \"{check_data}\"",
-    CreateItemScriptFailed {
+    ItemScriptFailed {
         cause: ScriptError,
     }; "Interpreting item creation script failed: {cause}"; cause,
-    CreateItemInvalidScript {
+    ItemInvalidScript {
         script: Script,
     }; "Invalid item creation script: {script:?}",
-
-    // P2PKH input validation errors
-    P2PKHWrongAddress {
-        output_address: P2PKHAddress,
-        input_address: P2PKHAddress,
-        input_pubkey: PublicKey,
-    }; "P2PKH output address \"{output_address}\" doesn't match address \"{input_address}\" \
-        (computed from input public key \"{input_pubkey}\")",
-    P2PKHInvalidSignature {
-        output_address: P2PKHAddress,
-        check_data: String,
-        input: P2PKHTxIn,
-    }; "P2PKH input {input:?} (address=\"{output_address}\") has invalid signature for check_data \"{check_data}\"",
 });
 
 /// Checks whether a create transaction has a valid input script
@@ -285,12 +355,12 @@ pub enum TxValidationError {
 ///
 /// * `script`      - Script to validate
 /// * `asset`       - Asset to be created
-pub fn tx_has_valid_create_script(script: &Script, asset: &Asset) -> Result<(), TxValidationError> {
+pub fn tx_has_valid_create_script(script: &Script, asset: &Asset) -> Result<(), CreateValidationError> {
     let asset_hash = construct_tx_in_signable_asset_hash(asset);
 
     if let Asset::Item(r) = asset {
         if !item_has_valid_size(r) {
-            return Err(TxValidationError::CreateItemMetadataTooLarge {
+            return Err(CreateValidationError::ItemMetadataTooLarge {
                 metadata_size: r.metadata.as_ref()
                     .expect("item metadata is both too large and None?!?")
                     .len()
@@ -304,7 +374,7 @@ pub fn tx_has_valid_create_script(script: &Script, asset: &Asset) -> Result<(), 
         let b_hex = hex::encode(b);
 
         if b_hex != asset_hash {
-            return Err(TxValidationError::CreateItemHashMismatch {
+            return Err(CreateValidationError::ItemHashMismatch {
                 asset_hash,
                 check_data: b_hex,
             });
@@ -312,11 +382,11 @@ pub fn tx_has_valid_create_script(script: &Script, asset: &Asset) -> Result<(), 
 
         return match script.interpret_full() {
             Ok(()) => Ok(()),
-            Err(cause) => Err(TxValidationError::CreateItemScriptFailed { cause })
+            Err(cause) => Err(CreateValidationError::ItemScriptFailed { cause })
         };
     }
 
-    Err(TxValidationError::CreateItemInvalidScript {
+    Err(CreateValidationError::ItemInvalidScript {
         script: script.clone(),
     })
 }
@@ -350,6 +420,22 @@ pub fn match_p2pkh_script(
     }
 }
 
+make_error_type!(
+#[derive(PartialEq)]
+pub enum P2PKHValidationError {
+    WrongAddress {
+        output_address: P2PKHAddress,
+        input_address: P2PKHAddress,
+        input_pubkey: PublicKey,
+    }; "P2PKH output address \"{output_address}\" doesn't match address \"{input_address}\" \
+        (computed from input public key \"{input_pubkey}\")",
+    InvalidSignature {
+        output_address: P2PKHAddress,
+        check_data: String,
+        input: P2PKHTxIn,
+    }; "P2PKH input {input:?} (address=\"{output_address}\") has invalid signature for check_data \"{check_data}\"",
+});
+
 /// Checks whether a transaction to spend tokens in P2PKH has a valid signature
 ///
 /// ### Arguments
@@ -362,16 +448,16 @@ fn tx_has_valid_p2pkh_sig(
     input: &P2PKHTxIn,
     outpoint_hash: &str,
     address: &P2PKHAddress,
-) -> Result<(), TxValidationError> {
+) -> Result<(), P2PKHValidationError> {
     let input_address = P2PKHAddress::from_pubkey(&input.public_key);
     if &input_address != address {
-        Err(TxValidationError::P2PKHWrongAddress {
+        Err(P2PKHValidationError::WrongAddress {
             output_address: address.clone(),
             input_address,
             input_pubkey: input.public_key.clone(),
         })
     } else if !sign_ed25519::verify_detached(&input.signature, outpoint_hash.as_bytes(), &input.public_key) {
-        Err(TxValidationError::P2PKHInvalidSignature {
+        Err(P2PKHValidationError::InvalidSignature {
             output_address: address.clone(),
             check_data: outpoint_hash.to_owned(),
             input: input.clone(),
@@ -398,6 +484,7 @@ fn item_has_valid_size(item: &ItemAsset) -> bool {
 /// ### Arguments
 ///
 /// * `address` - Address to check
+#[deprecated = "Use AnyAddress::from_str(address).is_ok()"]
 fn address_has_valid_length(address: &str) -> bool {
     address.len() == 32 || address.len() == 64
 }
@@ -2804,7 +2891,7 @@ mod tests {
         let script = Script::new_create_asset(0, asset_hash, signature, pk);
         assert_eq!(
             tx_has_valid_create_script(&script, &asset),
-            Err(TxValidationError::CreateItemMetadataTooLarge { metadata_size: MAX_METADATA_BYTES + 1 }),
+            Err(CreateValidationError::ItemMetadataTooLarge { metadata_size: MAX_METADATA_BYTES + 1 }),
             "invalid create asset script: {:?}", script);
     }
 
@@ -2924,7 +3011,7 @@ mod tests {
                 &hash_to_sign,
                 &tx_out_address,
             ),
-            Err(TxValidationError::P2PKHWrongAddress {
+            Err(P2PKHValidationError::WrongAddress {
                 output_address: tx_out_address.clone(),
                 input_address: P2PKHAddress::from_pubkey(&second_pk),
                 input_pubkey: second_pk.clone(),
@@ -2967,7 +3054,7 @@ mod tests {
                 &wrong_hash_to_sign,
                 &tx_out_address,
             ),
-            Err(TxValidationError::P2PKHInvalidSignature {
+            Err(P2PKHValidationError::InvalidSignature {
                 output_address: tx_out_address.clone(),
                 check_data: wrong_hash_to_sign.clone(),
                 input: P2PKHTxIn {
@@ -3090,9 +3177,9 @@ mod tests {
                 ..Default::default()
             };
 
-            tx_is_valid(&tx, 500000000, |v| {
+            tx_is_valid_full(&tx, 500000000, |v| {
                 Some(&tx_in_previous_out).filter(|_| v == &valid_tx_outpoint)
-            })
+            }).is_ok()
         });
 
         actual_result == inputs.map(|(_, e)| e)
@@ -3110,7 +3197,7 @@ mod tests {
         test_tx_drs_common(
             &[(3, None, None), (2, None, None)],
             &[(3, None), (2, None)],
-            true,
+            Ok(()),
         );
     }
 
@@ -3127,7 +3214,10 @@ mod tests {
         test_tx_drs_common(
             &[(3, None, None), (2, None, None)],
             &[(3, None), (3, None)],
-            false,
+            Err(TxValidationError::InconsistentInputAndOutputValue {
+                input_value: AssetValues::token_u64(5),
+                output_value: AssetValues::token_u64(6),
+            }),
         );
     }
 
@@ -3147,7 +3237,14 @@ mod tests {
                 (2, Some("genesis_hash_2"), None),
             ],
             &[(3, Some("genesis_hash_1")), (3, Some("genesis_hash_2"))],
-            false,
+            Err(TxValidationError::InconsistentInputAndOutputValue {
+                input_value: AssetValues::new(
+                    TokenAmount(0),
+                    BTreeMap::from([("genesis_hash_1".to_string(), 3), ("genesis_hash_2".to_string(), 2)])),
+                output_value: AssetValues::new(
+                    TokenAmount(0),
+                    BTreeMap::from([("genesis_hash_1".to_string(), 3), ("genesis_hash_2".to_string(), 3)])),
+            }),
         );
     }
 
@@ -3170,7 +3267,14 @@ mod tests {
                 (3, Some("genesis_hash_1")),
                 (2, Some("invalid_genesis_hash")),
             ],
-            false,
+            Err(TxValidationError::InconsistentInputAndOutputValue {
+                input_value: AssetValues::new(
+                    TokenAmount(0),
+                    BTreeMap::from([("genesis_hash_1".to_string(), 3), ("genesis_hash_2".to_string(), 2)])),
+                output_value: AssetValues::new(
+                    TokenAmount(0),
+                    BTreeMap::from([("genesis_hash_1".to_string(), 3), ("invalid_genesis_hash".to_string(), 2)])),
+            }),
         );
     }
 
@@ -3187,7 +3291,7 @@ mod tests {
         test_tx_drs_common(
             &[(3, Some("genesis_hash"), None), (2, None, None)],
             &[(3, Some("genesis_hash")), (2, None)],
-            true,
+            Ok(()),
         );
     }
 
@@ -3204,7 +3308,14 @@ mod tests {
         test_tx_drs_common(
             &[(3, Some("genesis_hash"), None), (2, None, None)],
             &[(2, Some("genesis_hash")), (2, None)],
-            false,
+            Err(TxValidationError::InconsistentInputAndOutputValue {
+                input_value: AssetValues::new(
+                    TokenAmount(2),
+                    BTreeMap::from([("genesis_hash".to_string(), 3)])),
+                output_value: AssetValues::new(
+                    TokenAmount(2),
+                    BTreeMap::from([("genesis_hash".to_string(), 2)])),
+            }),
         );
     }
 
@@ -3230,7 +3341,14 @@ mod tests {
                 (2, None, test_metadata),
             ],
             &[(1, Some("invalid_genesis_hash")), (1, None)],
-            false,
+            Err(TxValidationError::InconsistentInputAndOutputValue {
+                input_value: AssetValues::new(
+                    TokenAmount(2),
+                    BTreeMap::from([("genesis_hash".to_string(), 3)])),
+                output_value: AssetValues::new(
+                    TokenAmount(1),
+                    BTreeMap::from([("invalid_genesis_hash".to_string(), 1)])),
+            }),
         );
     }
 
@@ -3239,7 +3357,7 @@ mod tests {
     fn test_tx_drs_common(
         inputs: &[(u64, Option<&str>, Option<String>)],
         outputs: &[(u64, Option<&str>)],
-        expected_result: bool,
+        expected_result: Result<(), TxValidationError>,
     ) {
         ///
         /// Arrange
@@ -3249,7 +3367,7 @@ mod tests {
         ///
         /// Act
         ///
-        let actual_result = tx_is_valid(&tx, 100, |v| utxo.get(v));
+        let actual_result = tx_is_valid_full(&tx, 100, |v| utxo.get(v));
 
         ///
         /// Assert
