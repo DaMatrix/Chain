@@ -84,6 +84,13 @@ pub mod sign_ed25519 {
         pub unsafe fn from_slice_unsafe(slice: &[u8]) -> Self {
             Self(slice.to_vec())
         }
+
+        /// Computes the public key corresponding to this private key.
+        pub fn get_public_key(&self) -> PublicKey {
+            let keypair = SecretKeyBase::from_pkcs8(&self.0)
+                .expect("SecretKey contains invalid PKCS8 document...");
+            PublicKey::from_slice(keypair.public_key().as_ref()).unwrap()
+        }
     }
 
     impl AsRef<[u8]> for SecretKey {
