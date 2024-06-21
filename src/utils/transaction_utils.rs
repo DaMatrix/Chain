@@ -9,8 +9,8 @@ use crate::script::{OpCodes, ScriptEntry, StackEntry};
 use std::collections::BTreeMap;
 use std::convert::TryInto;
 use tracing::debug;
+use crate::primitives::address::AnyAddress;
 use crate::primitives::format;
-use crate::utils::script_utils::{match_v6_script, MatchV6Script};
 
 pub struct ReceiverInfo {
     pub address: String,
@@ -156,26 +156,6 @@ fn get_script_signable_string(stack: &[StackEntry]) -> String {
         .map(get_stack_entry_signable_string)
         .collect::<Vec<String>>()
         .join("-")
-}
-
-fn get_v6_script_signable_string(script: &Script) -> String {
-    match match_v6_script(script).expect("unknown or unsupported v6 script") {
-        MatchV6Script::Coinbase { block_number } =>
-            format!("Num:{}",
-                    block_number),
-        MatchV6Script::Create { block_number, asset_hash, signature, public_key } =>
-            format!("Op:OP_CREATE-Num:{}-Op:OP_DROP-Bytes:{}-Signature:{}-PubKey:{}-Op:OP_CHECKSIG",
-                    block_number,
-                    hex::encode(asset_hash),
-                    hex::encode(signature.as_ref()),
-                    hex::encode(public_key.as_ref())),
-        MatchV6Script::P2PKH { check_data, signature, public_key, public_key_hash } =>
-            format!("Bytes:{}-Signature:{}-PubKey:{}-Op:OP_DUP-Op:OP_HASH256-Bytes:{}-Op:OP_EQUALVERIFY-Op:OP_CHECKSIG",
-                    hex::encode(check_data),
-                    hex::encode(signature.as_ref()),
-                    hex::encode(public_key.as_ref()),
-                    hex::encode(public_key_hash)),
-    }
 }
 
 /// Constructs signable string for TxIn
@@ -435,25 +415,30 @@ pub fn construct_payment_tx(
     construct_tx_core(final_tx_ins, tx_outs, fee)
 }
 
-/// Constructs a P2SH transaction to burn tokens
+/// Constructs a transaction to burn tokens
 ///
 /// ### Arguments
 ///
 /// * `tx_ins`  - Input/s to pay from
-pub fn construct_burn_tx(tx_ins: Vec<TxInConstructor>, fee: Option<ReceiverInfo>, key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>) -> Transaction {
-    /*let script = Script::build(&[ScriptEntry::Op(OpCodes::OP_BURN)]);
-    let script_hash = construct_p2sh_address(&script);
+// TODO: This seems kinda dumb, because there's no way to indicate where the change should go.
+pub fn construct_burn_tx(
+    tx_ins: Vec<TxInConstructor>,
+    value: Asset,
+    fee: Option<ReceiverInfo>,
+    key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>,
+) -> Transaction {
+    todo!();
 
     let tx_out = TxOut {
-        script_public_key: Some(script_hash),
-        ..Default::default()
+        value,
+        locktime: 0,
+        script_public_key: None,
     };
     let tx_outs = vec![tx_out];
 
     let final_tx_ins = update_input_signatures(&tx_ins, &tx_outs, key_material);
 
-    construct_tx_core(final_tx_ins, tx_outs, fee)*/
-    todo!()
+    construct_tx_core(final_tx_ins, tx_outs, fee)
 }
 
 /// Constructs a transaction to pay a receiver
@@ -765,16 +750,13 @@ mod tests {
 
     #[test]
     fn test_construct_a_valid_burn_tx() {
-        todo!();
-
-        /*let token_amount = TokenAmount(400000);
+        let token_amount = TokenAmount(400000);
         let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs();
 
-        let burn_tx = construct_burn_tx(tx_ins, None, &key_material);
-
+        let burn_tx = construct_burn_tx(tx_ins, Asset::Token(token_amount), None, &key_material);
         let spending_tx_hash = construct_tx_hash(&burn_tx);
 
-        let tx_const = TxConstructor {
+        /*let tx_const = TxConstructor {
             previous_out: OutPoint::new_from_hash(spending_tx_hash.parse().unwrap(), 0),
             signatures: vec![],
             pub_keys: vec![],
@@ -1036,10 +1018,9 @@ mod tests {
             script_public_key: Some(to_asset.clone()),
             ..Default::default()
         }];
-        let tx_ins = update_input_signatures(&tx_ins, &tx_outs, &key_material);
 
-        todo!();
-        /*let from_addr = construct_tx_ins_address(&tx_ins);
+        let signed_tx_ins = update_input_signatures(&tx_ins, &tx_outs, &key_material);
+        let from_addr = construct_tx_ins_address(TxVersion::V6, &signed_tx_ins, &tx_outs);
 
         // DDE params
         let druid = hex::encode(vec![1, 2, 3, 4, 5]);
@@ -1061,7 +1042,7 @@ mod tests {
 
         assert_eq!(dde.druid_info.clone().unwrap().druid, druid);
         assert_eq!(dde.outputs[0].clone().value, data);
-        assert_eq!(dde.druid_info.unwrap().participants, participants);*/
+        assert_eq!(dde.druid_info.unwrap().participants, participants);
     }
 
     #[test]
@@ -1261,6 +1242,8 @@ mod tests {
 
         let tx_outs = [];
 
+        let tx_version = TxVersion::V6;
+
         let secret_keys = [
             "3053020101300506032b65700422042048dda5bbe9171a6656206ec56c595c5834b6cf38c5fe71bcb44fe43833aee9dfa1230321004a423a99c7d946e88da185f8f400e41cee388a95ecedc8603136de50aea12182",
             "3053020101300506032b657004220420b875632ccf606eef2397124e6c2febf24e91a89b43c6bf762c8e9ea61a48e9a9a1230321002a698271b680fd389ca2dc4823a8084065b2554caf0753b5ddc57a750564b1d4",
@@ -1298,10 +1281,7 @@ mod tests {
         //
 
         let expected_signable_data = previous_out_points.each_ref()
-            .map(|out_point| construct_tx_in_out_signable_hash(&TxIn {
-                previous_out: Some(out_point.clone()),
-                script_signature: Default::default(),
-            }, &tx_outs));
+            .map(|out_point| construct_tx_in_out_signable_hash(out_point, &tx_outs));
         assert_eq!(
             signable_data,
             expected_signable_data.each_ref().map(String::as_str),
@@ -1335,18 +1315,32 @@ mod tests {
             })
             .into_array().unwrap();
 
+        let actual_tx_in_address_signable_strings = tx_ins.iter().enumerate()
+            .map(|tx_in| get_tx_in_address_signable_string(
+                tx_version,
+                tx_in,
+                &tx_outs,
+            ))
+            .into_array::<[_; TX_IN_COUNT]>().unwrap();
+
+        let actual_tx_ins_address = construct_tx_ins_address(
+            tx_version,
+            &tx_ins,
+            &tx_outs,
+        );
+
         assert_eq!(
-            tx_ins.each_ref().map(get_tx_in_address_signable_string),
+            actual_tx_in_address_signable_strings,
             tx_in_address_signable_strings.map(str::to_owned),
             "tx_in_address_signable_string");
 
         assert_eq!(
-            construct_tx_ins_address(&tx_ins),
-            hex::encode(sha3_256::digest(tx_ins.each_ref().map(get_tx_in_address_signable_string).join("-").as_bytes())),
+            actual_tx_ins_address,
+            hex::encode(sha3_256::digest(actual_tx_in_address_signable_strings.join("-").as_bytes())),
             "tx_ins_address_signable_string");
 
         assert_eq!(
-            &construct_tx_ins_address(&tx_ins),
+            &actual_tx_ins_address,
             "2e647db8fbe885d3260bebf2e1ca05a2a69ce93443e4185b144b6ccb44d976b6",
             "tx_ins_address");
     }

@@ -106,6 +106,7 @@ standard_address_type!("The type of address used for P2SH outputs", P2SHAddress,
 pub enum AnyAddress {
     P2PKH(P2PKHAddress),
     P2SH(P2SHAddress),
+    Burn,
 }
 
 impl Display for AnyAddress {
@@ -113,6 +114,7 @@ impl Display for AnyAddress {
         match self {
             AnyAddress::P2PKH(address) => address.fmt(f),
             AnyAddress::P2SH(address) => address.fmt(f),
+            AnyAddress::Burn => f.write_str("BURN"),
         }
     }
 }
@@ -125,6 +127,8 @@ impl FromStr for AnyAddress {
             Ok(Self::P2PKH(addr))
         } else if let Ok(addr) = P2SHAddress::from_str(s) {
             Ok(Self::P2SH(addr))
+        } else if s == "BURN" {
+            Ok(Self::Burn)
         } else {
             Err(ParseAddressError::BadPrefix(s.to_string()))
         }
