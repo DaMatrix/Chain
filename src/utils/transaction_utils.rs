@@ -738,6 +738,7 @@ mod tests {
     use crate::crypto::sign_ed25519::{self as sign, Signature};
     use crate::primitives::asset::{AssetValues, ItemAsset, TokenAmount};
     use crate::script::OpCodes;
+    use crate::utils::IntoArray;
     use crate::utils::script_utils::{tx_has_valid_p2sh_script, tx_outs_are_valid};
 
     #[test]
@@ -1440,52 +1441,93 @@ mod tests {
         //
         // Arrange
         //
-        let pub_keys = [
-            "5e6d463ec66d7999769fa4de56f690dfb62e685b97032f5926b0cb6c93ba83c6",
-            "58272ba93c1e79df280d4c417de47dbf6a7e330ba52793d7baa8e00ae5c34e59",
-            "efa9dcba0f3282b3ed4a6aa1ccdb169d6685a30d7b2af7a2171a5682f3112359",
-        ];
+        const TX_IN_COUNT : usize = 3;
 
-        let signatures = ["660e4698d817d409feb209699b15935048c8b3c4ac86a23f25b05aa32fb8b87e7cd029b83220d31a0b2717bd63b47a320a7728355d7fae43a665d6e27743e20d", 
-            "fd107c9446cdcbd8fbb0d6b88c73067c9bd15de03fff677b0129acf1bd2d14a5ab8a63c7eb6fe8c5acc4b44b033744760847194a15b006368d178c85243d0605", 
-            "e1a436bbfcb3e411be1ce6088cdb4c39d7e79f8fe427943e74307e43864fd0f6ef26123f1439b92c075edd031d17feb4dd265c6fcc2e5ed571df48a03c396100"];
+        let tx_outs = [];
+
+        let secret_keys = [
+            "3053020101300506032b65700422042048dda5bbe9171a6656206ec56c595c5834b6cf38c5fe71bcb44fe43833aee9dfa1230321004a423a99c7d946e88da185f8f400e41cee388a95ecedc8603136de50aea12182",
+            "3053020101300506032b657004220420b875632ccf606eef2397124e6c2febf24e91a89b43c6bf762c8e9ea61a48e9a9a1230321002a698271b680fd389ca2dc4823a8084065b2554caf0753b5ddc57a750564b1d4",
+            "3053020101300506032b65700422042087ac5d1ddfa64329d8548b34c25ee5edea790e1311eb55467461114c31f1a011a1230321003549f82095030b2ca9577c828363f0fdbd92d9a131f698536e6b306cdad3f26e",
+        ].map(|sk| SecretKey::from_slice(&hex::decode(sk).expect(sk)).expect(sk));
+
+        let pub_keys = secret_keys.each_ref().map(SecretKey::get_public_key);
+
+        let signatures = [
+            "36f303bb3f677ac36829e265dcef8e4ed9c83d8e974edfafdb487ad5e3a763055e66ecd5cbb40a1e3d26efe5012b39fae18b87e0a0fc8028d35e277ca0b7f20f",
+            "9c0ef4c0a453f41c3887b29c32a057956adcc4104e226a5f8d601b7dd9f3c6889a963e255440e6716c36d3e865c30c54fa4b3145c83053d6d8461e7f0f872b08",
+            "c19533e0b6d7d355f11c7f3911e05f11d9b6d50a571496e71eae223d86f42e67d69574f6313ba1c2976bbc82452caca467e74108d5cda371574746d677620000",
+        ].map(|sig| Signature::from_slice(&hex::decode(sig).expect(sig)).expect(sig));
 
         let signable_data = [
-            "927b3411743452e5e0d73e9e40a4fa3c842b3d00dabde7f9af7e44661ce02c88",
-            "754dc248d1c847e8a10c6f8ded6ccad96381551ebb162583aea2a86b9bb78dfa",
-            "5585c6f74d5c55f1ab457c31671822ba28c78c397cce1e11680b9f3852f96edb",
+            "2343882840e27740d97be23e8940390af6c8d97d5878bdecd6462520b981eeb7",
+            "9081d463757aa7ed5213e734ea13ff66db84ba8ca70dee97e2c4ec008759d8f2",
+            "45edc12b9c1457b82c499d90e702e29fc66474e2b8ca302bd3eb61dd2b7eb4b7",
         ];
 
-        let previous_out_points = vec![
+        let previous_out_points = [
             OutPoint::new("g48dda5bbe9171a6656206ec56c595c5".to_owned(), 0),
             OutPoint::new("gb875632ccf606eef2397124e6c2febf".to_owned(), 0),
             OutPoint::new("g87ac5d1ddfa64329d8548b34c25ee5e".to_owned(), 0),
         ];
 
+        let tx_in_address_signable_strings = [
+            "0-g48dda5bbe9171a6656206ec56c595c5-Bytes:2343882840e27740d97be23e8940390af6c8d97d5878bdecd6462520b981eeb7-Signature:36f303bb3f677ac36829e265dcef8e4ed9c83d8e974edfafdb487ad5e3a763055e66ecd5cbb40a1e3d26efe5012b39fae18b87e0a0fc8028d35e277ca0b7f20f-PubKey:4a423a99c7d946e88da185f8f400e41cee388a95ecedc8603136de50aea12182-Op:OP_DUP-Op:OP_HASH256-Bytes:09e184b463e5e8d4efaa3ff510f18421c7e50fe42fe4da7b54532ca206f339bb-Op:OP_EQUALVERIFY-Op:OP_CHECKSIG",
+            "0-gb875632ccf606eef2397124e6c2febf-Bytes:9081d463757aa7ed5213e734ea13ff66db84ba8ca70dee97e2c4ec008759d8f2-Signature:9c0ef4c0a453f41c3887b29c32a057956adcc4104e226a5f8d601b7dd9f3c6889a963e255440e6716c36d3e865c30c54fa4b3145c83053d6d8461e7f0f872b08-PubKey:2a698271b680fd389ca2dc4823a8084065b2554caf0753b5ddc57a750564b1d4-Op:OP_DUP-Op:OP_HASH256-Bytes:41063307a3fd68f3b03839c2889cd7ad0ae06259cad1be96ea4d8fa7e420d4d5-Op:OP_EQUALVERIFY-Op:OP_CHECKSIG",
+            "0-g87ac5d1ddfa64329d8548b34c25ee5e-Bytes:45edc12b9c1457b82c499d90e702e29fc66474e2b8ca302bd3eb61dd2b7eb4b7-Signature:c19533e0b6d7d355f11c7f3911e05f11d9b6d50a571496e71eae223d86f42e67d69574f6313ba1c2976bbc82452caca467e74108d5cda371574746d677620000-PubKey:3549f82095030b2ca9577c828363f0fdbd92d9a131f698536e6b306cdad3f26e-Op:OP_DUP-Op:OP_HASH256-Bytes:9019b9222a630ecd26a63edd69a8e4532b07cc188903b76c649450256264503d-Op:OP_EQUALVERIFY-Op:OP_CHECKSIG",
+        ];
+
+        //
+        // Verify arguments
+        //
+
+        let expected_signable_data = previous_out_points.each_ref()
+            .map(|out_point| construct_tx_in_out_signable_hash(&TxIn {
+                previous_out: Some(out_point.clone()),
+                script_signature: Default::default(),
+            }, &tx_outs));
+        assert_eq!(
+            signable_data,
+            expected_signable_data.each_ref().map(String::as_str),
+            "signable_data");
+
+        let expected_signatures = (0..TX_IN_COUNT)
+            .map(|n| sign_detached(signable_data[n].as_ref(), &secret_keys[n]))
+            .into_array::<[_; TX_IN_COUNT]>().unwrap();
+        assert_eq!(
+            signatures,
+            expected_signatures,
+            "signatures");
+
         //
         // Act
         //
-        let tx_ins: Vec<TxIn> = (0..3)
+        let tx_ins: [TxIn; TX_IN_COUNT] = (0..TX_IN_COUNT)
             .map(|n| {
                 let sig_data = signable_data[n].to_owned();
-                let sig =
-                    Signature::from_slice(hex::decode(signatures[n]).unwrap().as_ref()).unwrap();
-                let pk = PublicKey::from_slice(hex::decode(pub_keys[n]).unwrap().as_ref()).unwrap();
+                let sig = signatures[n];
+                let pk = pub_keys[n];
 
                 let script = Script::pay2pkh(sig_data, sig, pk, None);
                 let out_p = previous_out_points[n].clone();
 
                 TxIn::new_from_input(out_p, script)
             })
-            .collect();
+            .into_array().unwrap();
 
-        let expected =
-            "f3d7b80f82f72260ba1b6235d608f0af871b7968ac1cde5ddf71a4a6b3385eec".to_owned();
-        let actual = construct_tx_ins_address(&tx_ins);
+        assert_eq!(
+            tx_ins.each_ref().map(get_tx_in_address_signable_string),
+            tx_in_address_signable_strings.map(str::to_owned),
+            "tx_in_address_signable_string");
 
-        //
-        // Assert
-        //
-        assert_eq!(actual, expected);
+        assert_eq!(
+            construct_tx_ins_address(&tx_ins),
+            hex::encode(sha3_256::digest(tx_ins.each_ref().map(get_tx_in_address_signable_string).join("-").as_bytes())),
+            "tx_ins_address_signable_string");
+
+        assert_eq!(
+            &construct_tx_ins_address(&tx_ins),
+            "2e647db8fbe885d3260bebf2e1ca05a2a69ce93443e4185b144b6ccb44d976b6",
+            "tx_ins_address");
     }
 }
