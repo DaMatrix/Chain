@@ -16,8 +16,10 @@ use crate::utils::transaction_utils::{
 };
 use ring::error;
 use std::collections::{BTreeMap, BTreeSet};
+use std::str::FromStr;
 use std::thread::current;
 use tracing::{debug, error, info, trace};
+use crate::primitives::address::{AnyAddress, P2PKHAddress, ParseAddressError};
 use crate::utils::array_match_slice_copy;
 
 use super::transaction_utils::construct_p2sh_address;
@@ -55,8 +57,6 @@ pub fn tx_is_valid<'a>(
     }
 
     for tx_in in &tx.inputs {
-
-        
         // Ensure the transaction is in the `UTXO` set
         let tx_out_point = match tx_in.find_previous_out() {
             Some(v) => v,
@@ -80,16 +80,27 @@ pub fn tx_is_valid<'a>(
         }
 
         // At this point `TxIn` will be valid
-        let tx_out_pk = tx_out.script_public_key.as_ref();
+        let tx_out_address = match tx_out.script_public_key.as_ref() {
+            // If script_public_key is unset, the output is effectively a burn output
+            None => AnyAddress::Burn,
+            Some(text_address) => match AnyAddress::from_str(text_address) {
+                Ok(address) => address,
+                Err(err) => {
+                    error!("INVALID script_public_key: {:?}", err);
+                    return false;
+                },
+            },
+        };
+
         let tx_out_hash = construct_tx_in_signable_hash(tx_out_point);
         let full_tx_hash = construct_tx_in_out_signable_hash(
             tx_in.find_previous_out().unwrap(), &tx.outputs);
 
         debug!("full_tx_hash: {:?}", full_tx_hash);
 
-        match (tx_out_pk, tx_in) {
-            (Some(pk), TxIn::P2PKH(p2pkh)) =>
-                match tx_has_valid_p2pkh_sig(p2pkh, &full_tx_hash, pk) {
+        match (&tx_out_address, tx_in) {
+            (AnyAddress::P2PKH(address), TxIn::P2PKH(p2pkh)) =>
+                match tx_has_valid_p2pkh_sig(p2pkh, &full_tx_hash, address) {
                     Ok(()) => (),
                     Err(err) => {
                         // TODO: propagate error
@@ -97,7 +108,10 @@ pub fn tx_is_valid<'a>(
                         return false;
                     }
                 },
-            _ => return false,
+            _ => {
+                error!("OUTPUT ADDRESS {tx_out_address} IS INCOMPATIBLE WITH TxIn {tx_in:?}");
+                return false;
+            },
         }
 
         let asset = tx_out.value.clone().with_fixed_hash(tx_out_point);
@@ -253,13 +267,13 @@ pub enum TxValidationError {
 
     // P2PKH input validation errors
     P2PKHWrongAddress {
-        output_address: String,
-        input_address: String,
+        output_address: P2PKHAddress,
+        input_address: P2PKHAddress,
         input_pubkey: PublicKey,
     }; "P2PKH output address \"{output_address}\" doesn't match address \"{input_address}\" \
         (computed from input public key \"{input_pubkey}\")",
     P2PKHInvalidSignature {
-        output_address: String,
+        output_address: P2PKHAddress,
         check_data: String,
         input: P2PKHTxIn,
     }; "P2PKH input {input:?} (address=\"{output_address}\") has invalid signature for check_data \"{check_data}\"",
@@ -347,18 +361,18 @@ pub fn match_p2pkh_script(
 fn tx_has_valid_p2pkh_sig(
     input: &P2PKHTxIn,
     outpoint_hash: &str,
-    address: &str,
+    address: &P2PKHAddress,
 ) -> Result<(), TxValidationError> {
-    let input_address = construct_address(&input.public_key);
-    if input_address != address {
+    let input_address = P2PKHAddress::from_pubkey(&input.public_key);
+    if &input_address != address {
         Err(TxValidationError::P2PKHWrongAddress {
-            output_address: address.to_owned(),
+            output_address: address.clone(),
             input_address,
             input_pubkey: input.public_key.clone(),
         })
     } else if !sign_ed25519::verify_detached(&input.signature, outpoint_hash.as_bytes(), &input.public_key) {
         Err(TxValidationError::P2PKHInvalidSignature {
-            output_address: address.to_owned(),
+            output_address: address.clone(),
             check_data: outpoint_hash.to_owned(),
             input: input.clone(),
         })
@@ -2867,12 +2881,12 @@ mod tests {
 
         let hash_to_sign = construct_tx_in_out_signable_hash(
             &outpoint, &tx_outs);
-        let tx_out_pk = construct_address(&pk);
+        let tx_out_address = P2PKHAddress::from_pubkey(&pk);
 
         assert_eq!(tx_has_valid_p2pkh_sig(
             (&tx_ins[0]).try_into().unwrap(),
             &hash_to_sign,
-            &tx_out_pk
+            &tx_out_address
         ), Ok(()));
     }
 
@@ -2902,17 +2916,17 @@ mod tests {
 
         let hash_to_sign = construct_tx_in_out_signable_hash(
             &outpoint, &tx_outs);
-        let tx_out_pk = construct_address(&pk);
+        let tx_out_address = P2PKHAddress::from_pubkey(&pk);
 
         assert_eq!(
             tx_has_valid_p2pkh_sig(
                 (&tx_ins[0]).try_into().unwrap(),
                 &hash_to_sign,
-                &tx_out_pk,
+                &tx_out_address,
             ),
             Err(TxValidationError::P2PKHWrongAddress {
-                output_address: tx_out_pk.clone(),
-                input_address: construct_address(&second_pk),
+                output_address: tx_out_address.clone(),
+                input_address: P2PKHAddress::from_pubkey(&second_pk),
                 input_pubkey: second_pk.clone(),
             }));
     }
@@ -2942,7 +2956,7 @@ mod tests {
 
         let hash_to_sign = construct_tx_in_out_signable_hash(
             &outpoint, &tx_outs);
-        let tx_out_pk = construct_address(&pk);
+        let tx_out_address = P2PKHAddress::from_pubkey(&pk);
 
         let wrong_hash_to_sign = construct_tx_in_out_signable_hash(
             &wrong_outpoint, &tx_outs);
@@ -2951,10 +2965,10 @@ mod tests {
             tx_has_valid_p2pkh_sig(
                 (&tx_ins[0]).try_into().unwrap(),
                 &wrong_hash_to_sign,
-                &tx_out_pk,
+                &tx_out_address,
             ),
             Err(TxValidationError::P2PKHInvalidSignature {
-                output_address: tx_out_pk.clone(),
+                output_address: tx_out_address.clone(),
                 check_data: wrong_hash_to_sign.clone(),
                 input: P2PKHTxIn {
                     previous_out: outpoint.clone(),

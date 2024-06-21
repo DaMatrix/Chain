@@ -51,6 +51,7 @@ pub fn construct_p2sh_address(script: &Script) -> String {
 /// ### Arguments
 ///
 /// * `pub_key` - A public key to build an address from
+#[deprecated = "Use P2PKHAddress::from_pubkey"]
 pub fn construct_address(pub_key: &PublicKey) -> String {
     hex::encode(sha3_256::digest(pub_key.as_ref()))
 }
