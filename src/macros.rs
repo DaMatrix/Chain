@@ -70,6 +70,85 @@ macro_rules! make_error_type {
     };
 }
 
+/// Generate an enum where each variant represents a unique named value.
+///
+/// This will automatically generate the enum, but also implement the following traits:
+/// * `ToName` and `FromName` with the variant names
+/// * `Display` with the variant names
+///
+/// Additionally, a constant array containing every enum variant will be generated with the
+/// given name and visibility.
+///
+/// Example usage:
+/// ```ignore
+/// make_trivial_enum!(pub enum MyError {
+///     Hello,
+///     World,
+/// }
+/// all_variants=pub(crate) ALL_VARIANTS);
+/// ```
+macro_rules! make_trivial_enum {
+    (
+        @impl_toname_fromname_display
+        $ename:ident {
+            $( $vname:ident ),+
+        }
+        $all_variants_vis:vis $all_variants:ident
+    ) => {
+        impl $ename {
+            $all_variants_vis const $all_variants : &'static [Self] =
+                &[ $( Self::$vname ),+ ];
+        }
+
+        impl crate::utils::ToName for $ename {
+            fn to_name(&self) -> &'static str {
+                match self {
+                    $( Self::$vname => stringify!($vname) ),+
+                }
+            }
+        }
+
+        impl crate::utils::FromName for $ename {
+            const ALL_NAMES: &'static [&'static str] = &[ $( stringify!($vname) ),+ ];
+
+            fn from_name(name: &str) -> Result<Self, &str> {
+                match name {
+                    $( stringify!($vname) => Ok(Self::$vname), )+
+                    _ => Err(name),
+                }
+            }
+        }
+
+        impl std::fmt::Display for $ename {
+            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str(crate::utils::ToName::to_name(self))
+            }
+        }
+    };
+
+    (
+        $( #[$eattr:meta] )*
+        $evis:vis enum $ename:ident {
+            $(
+                $( #[$vattr:meta] )*
+                $vname:ident,
+            )+
+        }
+        all_variants=$all_variants_vis:vis $all_variants:ident
+    ) => {
+        $( #[$eattr] )*
+        $evis enum $ename {
+            $( $( #[$vattr] )* $vname ),+
+        }
+
+        make_trivial_enum!(
+            @impl_toname_fromname_display $ename {
+                $( $vname ),+
+            }
+            $all_variants_vis $all_variants);
+    };
+}
+
 /// Generate an enum where each variant simply wraps a numeric ordinal number.
 ///
 /// This will automatically generate the enum, but also implement the following traits:
@@ -104,52 +183,28 @@ macro_rules! make_ordinal_enum {
             $( $( #[$vattr] )* $vname = $vord, )+
         }
 
-        impl $ename {
-            $all_variants_vis const $all_variants : &'static [Self] =
-                &[ $( Self::$vname, )+ ];
-        }
+        make_trivial_enum!(
+            @impl_toname_fromname_display $ename {
+                $( $vname ),+
+            }
+            $all_variants_vis $all_variants);
 
         impl crate::utils::ToOrdinal for $ename {
             fn to_ordinal(&self) -> u32 {
                 match self {
-                    $( Self::$vname => $vord, )+
+                    $( Self::$vname => $vord ),+
                 }
             }
         }
 
         impl crate::utils::FromOrdinal for $ename {
-            const ALL_ORDINALS: &'static [u32] = &[ $($vord,)+ ];
+            const ALL_ORDINALS: &'static [u32] = &[ $( $vord ),+ ];
 
             fn from_ordinal(ordinal: u32) -> Result<Self, u32> {
                 match ordinal {
                     $( $vord => Ok(Self::$vname), )+
                     _ => Err(ordinal),
                 }
-            }
-        }
-
-        impl crate::utils::ToName for $ename {
-            fn to_name(&self) -> &'static str {
-                match self {
-                    $( Self::$vname => stringify!($vname), )+
-                }
-            }
-        }
-
-        impl crate::utils::FromName for $ename {
-            const ALL_NAMES: &'static [&'static str] = &[ $(stringify!($vname),)+ ];
-
-            fn from_name(name: &str) -> Result<Self, &str> {
-                match name {
-                    $( stringify!($vname) => Ok(Self::$vname), )+
-                    _ => Err(name),
-                }
-            }
-        }
-
-        impl std::fmt::Display for $ename {
-            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                f.write_str(crate::utils::ToName::to_name(self))
             }
         }
     };
