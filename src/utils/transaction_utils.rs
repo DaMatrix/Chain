@@ -679,7 +679,7 @@ mod tests {
     use crate::script::{OpCodes, ScriptError};
     use crate::utils::Placeholder;
     use crate::utils::IntoArray;
-    use crate::utils::script_utils::{tx_has_valid_p2sh_script, tx_outs_are_valid};
+    use crate::utils::script_utils::tx_outs_are_valid;
 
     fn test_construct_valid_inputs() -> (Vec<TxInConstructor<'static>>, String, BTreeMap<OutPoint, (PublicKey, SecretKey)>) {
         static KEYPAIR: Lazy<(PublicKey, SecretKey)> = Lazy::new(|| sign::gen_test_keypair(0).unwrap());

@@ -88,12 +88,15 @@ pub fn tx_is_valid<'a>(
         debug!("full_tx_hash: {:?}", full_tx_hash);
 
         match (tx_out_pk, tx_in) {
-            (Some(pk), TxIn::P2PKH(p2pkh)) => {
-                if !tx_has_valid_p2pkh_sig(p2pkh, &full_tx_hash, pk) {
-                    error!("INVALID P2PKH SIGNATURE");
-                    return false;
-                }
-            },
+            (Some(pk), TxIn::P2PKH(p2pkh)) =>
+                match tx_has_valid_p2pkh_sig(p2pkh, &full_tx_hash, pk) {
+                    Ok(()) => (),
+                    Err(err) => {
+                        // TODO: propagate error
+                        error!("INVALID P2PKH SIGNATURE: {:?}", err);
+                        return false;
+                    }
+                },
             _ => return false,
         }
 
@@ -230,19 +233,54 @@ pub fn match_create_script(
     }
 }
 
+make_error_type!(
+#[derive(Eq, PartialEq)]
+pub enum TxValidationError {
+    // CreateItem input validation errors
+    CreateItemMetadataTooLarge {
+        metadata_size: usize,
+    }; "Item metadata is too large: {metadata_size}",
+    CreateItemHashMismatch {
+        asset_hash: String,
+        check_data: String,
+    }; "Item asset hash \"{asset_hash}\" doesn't match creation script check_data \"{check_data}\"",
+    CreateItemScriptFailed {
+        cause: ScriptError,
+    }; "Interpreting item creation script failed: {cause}"; cause,
+    CreateItemInvalidScript {
+        script: Script,
+    }; "Invalid item creation script: {script:?}",
+
+    // P2PKH input validation errors
+    P2PKHWrongAddress {
+        output_address: String,
+        input_address: String,
+        input_pubkey: PublicKey,
+    }; "P2PKH output address \"{output_address}\" doesn't match address \"{input_address}\" \
+        (computed from input public key \"{input_pubkey}\")",
+    P2PKHInvalidSignature {
+        output_address: String,
+        check_data: String,
+        input: P2PKHTxIn,
+    }; "P2PKH input {input:?} (address=\"{output_address}\") has invalid signature for check_data \"{check_data}\"",
+});
+
 /// Checks whether a create transaction has a valid input script
 ///
 /// ### Arguments
 ///
 /// * `script`      - Script to validate
 /// * `asset`       - Asset to be created
-pub fn tx_has_valid_create_script(script: &Script, asset: &Asset) -> bool {
+pub fn tx_has_valid_create_script(script: &Script, asset: &Asset) -> Result<(), TxValidationError> {
     let asset_hash = construct_tx_in_signable_asset_hash(asset);
 
     if let Asset::Item(r) = asset {
         if !item_has_valid_size(r) {
-            trace!("Item metadata is too large");
-            return false;
+            return Err(TxValidationError::CreateItemMetadataTooLarge {
+                metadata_size: r.metadata.as_ref()
+                    .expect("item metadata is both too large and None?!?")
+                    .len()
+            });
         }
     }
 
@@ -251,13 +289,22 @@ pub fn tx_has_valid_create_script(script: &Script, asset: &Asset) -> bool {
         // the data itself.
         let b_hex = hex::encode(b);
 
-        if b_hex == asset_hash && script.interpret() {
-            return true;
+        if b_hex != asset_hash {
+            return Err(TxValidationError::CreateItemHashMismatch {
+                asset_hash,
+                check_data: b_hex,
+            });
         }
+
+        return match script.interpret_full() {
+            Ok(()) => Ok(()),
+            Err(cause) => Err(TxValidationError::CreateItemScriptFailed { cause })
+        };
     }
 
-    trace!("Invalid script for create: {:?}", script);
-    false
+    Err(TxValidationError::CreateItemInvalidScript {
+        script: script.clone(),
+    })
 }
 
 /// Checks if a script matches the P2PKH pattern and extracts the relevant fields.
@@ -301,38 +348,23 @@ fn tx_has_valid_p2pkh_sig(
     input: &P2PKHTxIn,
     outpoint_hash: &str,
     address: &str,
-) -> bool {
-    if construct_address(&input.public_key) == address &&
-        sign_ed25519::verify_detached(
-            &input.signature, outpoint_hash.as_bytes(), &input.public_key) {
-        return true;
+) -> Result<(), TxValidationError> {
+    let input_address = construct_address(&input.public_key);
+    if input_address != address {
+        Err(TxValidationError::P2PKHWrongAddress {
+            output_address: address.to_owned(),
+            input_address,
+            input_pubkey: input.public_key.clone(),
+        })
+    } else if !sign_ed25519::verify_detached(&input.signature, outpoint_hash.as_bytes(), &input.public_key) {
+        Err(TxValidationError::P2PKHInvalidSignature {
+            output_address: address.to_owned(),
+            check_data: outpoint_hash.to_owned(),
+            input: input.clone(),
+        })
+    } else {
+        Ok(())
     }
-
-    trace!(
-        "Invalid P2PKH script: {input:?} outpoint_hash=\"{outpoint_hash}\", address=\"{address}\"");
-    false
-}
-
-/// Checks whether a transaction to spend tokens in P2SH has a valid hash and executing script
-///
-/// ### Arguments
-///
-/// * `script`          - Script to validate
-/// * `address`         - Address of the P2SH transaction
-pub fn tx_has_valid_p2sh_script(script: &Script, address: &str) -> bool {
-    let p2sh_address = construct_p2sh_address(script);
-
-    if p2sh_address == address {
-        return script.interpret();
-    }
-
-    trace!(
-        "Invalid P2SH script: {:?}, address: {}",
-        script,
-        address
-    );
-
-    false
 }
 
 /// Checks that a item's metadata conforms to the network size constraint
@@ -2730,7 +2762,7 @@ mod tests {
         }
 
         tx_ins*/
-        todo!()
+        todo!("Multisig isn't yet supported!")
     }
 
     #[test]
@@ -2742,7 +2774,7 @@ mod tests {
         let signature = sign::sign_detached(asset_hash.as_bytes(), &sk);
 
         let script = Script::new_create_asset(0, asset_hash, signature, pk);
-        assert!(tx_has_valid_create_script(&script, &asset),
+        assert_eq!(tx_has_valid_create_script(&script, &asset), Ok(()),
                 "invalid create script: {:?}", script);
     }
 
@@ -2756,8 +2788,10 @@ mod tests {
         let signature = sign::sign_detached(asset_hash.as_bytes(), &sk);
 
         let script = Script::new_create_asset(0, asset_hash, signature, pk);
-        assert!(!tx_has_valid_create_script(&script, &asset),
-                "invalid create asset script: {:?}", script);
+        assert_eq!(
+            tx_has_valid_create_script(&script, &asset),
+            Err(TxValidationError::CreateItemMetadataTooLarge { metadata_size: MAX_METADATA_BYTES + 1 }),
+            "invalid create asset script: {:?}", script);
     }
 
     #[test]
@@ -2787,7 +2821,7 @@ mod tests {
         let tx_ins = create_multisig_member_tx_ins(vec![tx_const]);
 
         //assert_eq!(tx_ins[0].clone().script_signature.interpret_full(), Ok(()));
-        todo!()
+        todo!("Multisig isn't yet supported!")
     }
 
     #[test]
@@ -2807,7 +2841,7 @@ mod tests {
         let tx_ins = create_multisig_member_tx_ins(vec![tx_const]);
 
         //assert_eq!(tx_ins[0].clone().script_signature.interpret_full(), Err(ScriptError::LastEntryIsZero));
-        todo!()
+        todo!("Multisig isn't yet supported!")
     }
 
     #[test]
@@ -2835,16 +2869,17 @@ mod tests {
             &outpoint, &tx_outs);
         let tx_out_pk = construct_address(&pk);
 
-        assert!(tx_has_valid_p2pkh_sig(
+        assert_eq!(tx_has_valid_p2pkh_sig(
             (&tx_ins[0]).try_into().unwrap(),
             &hash_to_sign,
             &tx_out_pk
-        ));
+        ), Ok(()));
     }
 
     #[test]
-    /// Checks that invalid p2pkh transaction signatures are validated as such
-    fn test_fail_p2pkh_sig_invalid() {
+    /// Checks that valid p2pkh transaction signatures sent to an invalid address are validated
+    /// as such.
+    fn test_fail_p2pkh_sig_invalid_address() {
         let (pk, _sk) = sign::gen_test_keypair(0).unwrap();
         let (second_pk, second_sk) = sign::gen_test_keypair(1).unwrap();
 
@@ -2869,91 +2904,64 @@ mod tests {
             &outpoint, &tx_outs);
         let tx_out_pk = construct_address(&pk);
 
-        assert!(!tx_has_valid_p2pkh_sig(
-            (&tx_ins[0]).try_into().unwrap(),
-            &hash_to_sign,
-            &tx_out_pk
-        ));
+        assert_eq!(
+            tx_has_valid_p2pkh_sig(
+                (&tx_ins[0]).try_into().unwrap(),
+                &hash_to_sign,
+                &tx_out_pk,
+            ),
+            Err(TxValidationError::P2PKHWrongAddress {
+                output_address: tx_out_pk.clone(),
+                input_address: construct_address(&second_pk),
+                input_pubkey: second_pk.clone(),
+            }));
     }
 
     #[test]
     /// Checks that invalid p2pkh transaction signatures are validated as such
-    fn test_fail_p2pkh_sig_script_empty() {
-        /*let (pk, sk) = sign::gen_keypair().unwrap();
-        let outpoint = OutPoint::placeholder();
+    fn test_fail_p2pkh_sig_invalid_sig() {
+        let (pk, sk) = sign::gen_test_keypair(0).unwrap();
 
-        let hash_to_sign = construct_tx_in_signable_hash(&outpoint);
-        let signature = sign::sign_detached(hash_to_sign.as_bytes(), &sk);
+        let outpoint = OutPoint::placeholder_indexed(0);
+        let wrong_outpoint = OutPoint::placeholder_indexed(1);
 
-        let tx_const = TxConstructor {
-            previous_out: outpoint,
-            signatures: vec![signature],
-            pub_keys: vec![pk],
-        };
+        let key_material = BTreeMap::from([
+            (outpoint.clone(), (pk.clone(), sk.clone())),
+        ]);
 
-        let mut tx_ins = Vec::new();
+        let tx_outs = [];
+        let tx_const = [TxInConstructor::P2PKH {
+            previous_out: &outpoint,
+            public_key: &pk,
+            secret_key: &sk,
+        }];
+        let tx_ins = update_input_signatures(
+            &tx_const,
+            &tx_outs,
+            &key_material);
 
-        for entry in [tx_const] {
-            let mut new_tx_in = TxIn::new();
-            new_tx_in.script_signature = Script::new();
-            new_tx_in.previous_out = Some(entry.previous_out);
-
-            tx_ins.push(new_tx_in);
-        }
-
+        let hash_to_sign = construct_tx_in_out_signable_hash(
+            &outpoint, &tx_outs);
         let tx_out_pk = construct_address(&pk);
 
-        assert!(!tx_has_valid_p2pkh_sig(
-            &tx_ins[0].script_signature,
-            &hash_to_sign,
-            &tx_out_pk
-        ));*/
-        todo!("this could be implemented for upgraded v6 transactions?")
-    }
+        let wrong_hash_to_sign = construct_tx_in_out_signable_hash(
+            &wrong_outpoint, &tx_outs);
 
-    #[test]
-    /// Checks that invalid p2pkh transaction signatures are validated as such
-    fn test_fail_p2pkh_sig_script_invalid_struct() {
-        /*let (pk, sk) = sign::gen_test_keypair(0).unwrap();
-        let outpoint = OutPoint::placeholder();
-
-        let hash_to_sign = construct_tx_in_signable_hash(&outpoint);
-        let signature = sign::sign_detached(hash_to_sign.as_bytes(), &sk);
-
-        let tx_const = TxConstructor {
-            previous_out: outpoint,
-            signatures: vec![signature],
-            pub_keys: vec![pk],
-        };
-
-        let mut tx_ins = Vec::new();
-
-        for entry in [tx_const] {
-            let mut new_tx_in = TxIn::new();
-            // TODO: jrabil: re-do this before merge
-            new_tx_in.script_signature = Script::pay2pkh(
-                Vec::new(),
-                signature.clone(),
-                pk.clone(),
-            );
-            //new_tx_in.script_signature = Script::new();
-            //new_tx_in
-            //    .script_signature
-            //    .stack
-            //    .push(StackEntry::Bytes("".as_bytes().to_vec()));
-            new_tx_in.previous_out = Some(entry.previous_out);
-
-            tx_ins.push(new_tx_in);
-        }
-
-        let tx_out_pk = construct_address(&pk);
-
-        assert!(!tx_has_valid_p2pkh_sig(
-            &tx_ins[0].script_signature,
-            &hash_to_sign,
-            &tx_out_pk
-        ));*/
-        todo!("this is basically the same as test_fail_p2pkh_sig_invalid?!?")
+        assert_eq!(
+            tx_has_valid_p2pkh_sig(
+                (&tx_ins[0]).try_into().unwrap(),
+                &wrong_hash_to_sign,
+                &tx_out_pk,
+            ),
+            Err(TxValidationError::P2PKHInvalidSignature {
+                output_address: tx_out_pk.clone(),
+                check_data: wrong_hash_to_sign.clone(),
+                input: P2PKHTxIn {
+                    previous_out: outpoint.clone(),
+                    public_key: pk.clone(),
+                    signature: sign_ed25519::sign_detached(hash_to_sign.as_bytes(), &sk),
+                },
+            }));
     }
 
     #[test]
@@ -2978,7 +2986,7 @@ mod tests {
 
         assert_eq!(tx_ins[0].clone().script_signature.interpret_full(), Ok(()),
                    "multisig script_signature invalid: {:?}", tx_ins[0].script_signature);*/
-        todo!()
+        todo!("Multisig isn't yet supported!")
     }
 
     #[test]
@@ -3010,45 +3018,57 @@ mod tests {
         // Arrange
         //
         let (pk, sk) = sign::gen_test_keypair(0).unwrap();
-        let tx_outpoint = OutPoint::placeholder();
         let script_public_key = construct_address(&pk);
         let tx_in_previous_out =
             TxOut::new_token_amount(script_public_key.clone(), TokenAmount(5), locktime);
         let ongoing_tx_outs = vec![tx_in_previous_out.clone()];
 
+        let valid_tx_outpoint = OutPoint::placeholder_indexed(0);
         let valid_bytes = construct_tx_in_out_signable_hash(
-            &tx_outpoint, &ongoing_tx_outs);
+            &valid_tx_outpoint, &ongoing_tx_outs);
         let valid_sig = sign::sign_detached(valid_bytes.as_bytes(), &sk);
 
+        let invalid_tx_outpoint = OutPoint::placeholder_indexed(1);
+        let invalid_bytes = construct_tx_in_out_signable_hash(
+            &invalid_tx_outpoint, &ongoing_tx_outs);
+        let invalid_sig = sign::sign_detached(invalid_bytes.as_bytes(), &sk);
+
         // Test cases:
-        /*let inputs = [
+        let inputs = [
             // 0. Happy case: valid test
             (
-                Script::build(&[
-                    ScriptEntry::Data(&hex::decode(valid_bytes).unwrap()),
-                    ScriptEntry::Data(valid_sig.as_ref()),
-                    ScriptEntry::Data(pk.as_ref()),
-                    ScriptEntry::Op(OpCodes::OP_DUP),
-                    ScriptEntry::Op(OpCodes::OP_HASH256),
-                    ScriptEntry::Data(&hex::decode(script_public_key).unwrap()),
-                    ScriptEntry::Op(OpCodes::OP_EQUALVERIFY),
-                    ScriptEntry::Op(OpCodes::OP_CHECKSIG),
-                ]),
+                TxIn::P2PKH(P2PKHTxIn {
+                    previous_out: valid_tx_outpoint.clone(),
+                    public_key: pk.clone(),
+                    signature: valid_sig.clone(),
+                }),
                 true,
             ),
-            // 2. Empty script
-            (Script::build(&[ScriptEntry::Data(&[])]), false),
+            // 1. Signature doesn't match outpoint
+            (
+                TxIn::P2PKH(P2PKHTxIn {
+                    previous_out: valid_tx_outpoint.clone(),
+                    public_key: pk.clone(),
+                    signature: invalid_sig.clone(),
+                }),
+                false,
+            ),
+            // 2. Signature doesn't match outpoint
+            (
+                TxIn::P2PKH(P2PKHTxIn {
+                    previous_out: invalid_tx_outpoint.clone(),
+                    public_key: pk.clone(),
+                    signature: valid_sig.clone(),
+                }),
+                false,
+            ),
         ];
 
         //
         // Act
         //
-        let mut actual_result = Vec::new();
-        for (script, _) in &inputs {
-            let tx_ins = vec![TxIn {
-                script_signature: script.clone(),
-                previous_out: Some(tx_outpoint.clone()),
-            }];
+        let actual_result = inputs.each_ref().map(|(tx_in, _)| {
+            let tx_ins = vec![tx_in.clone()];
 
             let tx = Transaction {
                 inputs: tx_ins,
@@ -3056,14 +3076,12 @@ mod tests {
                 ..Default::default()
             };
 
-            let result = tx_is_valid(&tx, 500000000, |v| {
-                Some(&tx_in_previous_out).filter(|_| v == &tx_outpoint)
-            });
-            actual_result.push(result);
-        }
+            tx_is_valid(&tx, 500000000, |v| {
+                Some(&tx_in_previous_out).filter(|_| v == &valid_tx_outpoint)
+            })
+        });
 
-        actual_result == inputs.iter().map(|(_, e)| *e).collect::<Vec<bool>>()*/
-        todo!()
+        actual_result == inputs.map(|(_, e)| e)
     }
 
     #[test]
@@ -3227,7 +3245,7 @@ mod tests {
 
     #[test]
     /// Checks that incorrect member interpret scripts are validated as such
-    fn test_fail_interpret_valid() {
+    fn test_fail_multisig_member_interpret_valid() {
         /*let (_pk, sk) = sign::gen_keypair().unwrap();
         let (pk, _sk) = sign::gen_keypair().unwrap();
         let t_hash = TxHash::placeholder();
@@ -3242,12 +3260,12 @@ mod tests {
         let tx_ins = create_multisig_member_tx_ins(vec![tx_const]);
 
         assert_eq!(tx_ins[0].clone().script_signature.interpret_full(), Err(ScriptError::LastEntryIsZero));*/
-        todo!()
+        todo!("Multisig isn't yet supported!")
     }
 
     #[test]
     /// Checks that interpret scripts are validated as such
-    fn test_pass_interpret_valid() {
+    fn test_pass_multisig_member_interpret_valid() {
         /*let (pk, sk) = sign::gen_keypair().unwrap();
         let t_hash = TxHash::placeholder();
         let signature = sign::sign_detached(hex::encode(t_hash.as_ref()).as_bytes(), &sk);
@@ -3261,6 +3279,6 @@ mod tests {
         let tx_ins = create_multisig_member_tx_ins(vec![tx_const]);
 
         assert_eq!(tx_ins[0].clone().script_signature.interpret_full(), Ok(()));*/
-        todo!()
+        todo!("Multisig isn't yet supported!")
     }
 }
