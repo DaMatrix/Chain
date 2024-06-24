@@ -1,13 +1,14 @@
 use bincode::{Decode, Encode};
 use crate::primitives::asset::Asset;
 use serde::{Deserialize, Serialize};
+use crate::primitives::address::{AnyAddress, TxInsAddress};
 use crate::primitives::transaction::TxHash;
 
 /// The expectation to be met in a specific DRUID transaction
 #[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize, Encode, Decode)]
 pub struct DruidExpectation {
-    pub from: String,
-    pub to: String,
+    pub from: TxInsAddress,
+    pub to: AnyAddress,
     pub asset: Asset,
 }
 

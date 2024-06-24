@@ -2,7 +2,7 @@ use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::str::FromStr;
 use bincode::{Decode, Encode};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::crypto::sha3_256;
 use crate::crypto::sign_ed25519::PublicKey;
 use crate::utils::Placeholder;
@@ -58,14 +58,14 @@ pub enum ParseAddressError {
 });
 
 macro_rules! standard_address_type {
-    ($doc:literal, $name:ident, $prefix:literal, $anyname:ident) => {
+    ($doc:literal, $name:ident, $prefix:literal $(, wrap: $anyname:ident)?) => {
         #[doc = $doc]
         #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize, Encode, Decode)]
         #[serde(transparent)]
         pub struct $name { standard_address: StandardAddress }
 
-        impl $name {
-            /// Wraps this address into an `AnyAddress`
+        $( impl $name {
+            #[doc = "Wraps this address into an `AnyAddress`"]
             pub fn wrap(self) -> AnyAddress {
                 AnyAddress::$anyname(self)
             }
@@ -75,7 +75,7 @@ macro_rules! standard_address_type {
             fn from(value: $name) -> Self {
                 value.wrap()
             }
-        }
+        } )?
 
         impl From<StandardAddress> for $name {
             fn from(standard_address: StandardAddress) -> Self {
@@ -109,7 +109,7 @@ macro_rules! standard_address_type {
     };
 }
 
-standard_address_type!("The type of address used for P2PKH outputs", P2PKHAddress, "", P2PKH);
+standard_address_type!("The type of address used for P2PKH outputs", P2PKHAddress, "", wrap: P2PKH);
 
 impl P2PKHAddress {
     /// Creates a new P2PKH address from the hash of the given public key.
@@ -118,7 +118,16 @@ impl P2PKHAddress {
     }
 }
 
-//standard_address_type!("The type of address used for P2SH outputs", P2SHAddress, "H", P2SH);
+//standard_address_type!("The type of address used for P2SH outputs", P2SHAddress, "H", wrap: P2SH);
+
+standard_address_type!("The type of address used for DRUID input expectations outputs", TxInsAddress, "");
+
+impl TxInsAddress {
+    /// Creates a new TxIns address from the hash of the given public key.
+    pub fn from_hash(hash: sha3_256::Hash) -> Self {
+        StandardAddress::new(hash).into()
+    }
+}
 
 /// Wrapper enum representing an address of any type.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Encode, Decode)]
@@ -161,6 +170,22 @@ impl FromStr for AnyAddress {
         } else {
             Err(ParseAddressError::BadPrefix(s.to_string()))
         }
+    }
+}
+
+impl Serialize for AnyAddress {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        assert!(serializer.is_human_readable(), "serializer must be human-readable!");
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for AnyAddress {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        assert!(deserializer.is_human_readable(), "deserializer must be human-readable!");
+
+        let text : String = serde::Deserialize::deserialize(deserializer)?;
+        text.parse().map_err(<D::Error as serde::de::Error>::custom)
     }
 }
 

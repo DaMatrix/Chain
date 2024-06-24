@@ -257,6 +257,10 @@ make_error_type!(pub enum FromV6Error {
 
     BadAddress(script_public_key: String, cause: ParseAddressError);
         "transaction contained invalid script_public_key \"{script_public_key}\": {cause}"; cause,
+    BadDruidFromAddress(cause: ParseAddressError);
+        "transaction contained DRUID expectation with invalid from address: {cause}"; cause,
+    BadDruidToAddress(cause: ParseAddressError);
+        "transaction contained DRUID expectation with invalid to address: {cause}"; cause,
     BadItemGenesisHash(cause: TxHashError);
         "create transaction contained invalid genesis_hash: {cause}"; cause,
 
@@ -505,8 +509,8 @@ fn upgrade_v6_txout(old: &V6TxOut) -> Result<TxOut, FromV6Error> {
 
 fn upgrade_v6_druidexpectation(old: &V6DruidExpectation) -> Result<DruidExpectation, FromV6Error> {
     Ok(DruidExpectation {
-        from: old.from.clone(),
-        to: old.to.clone(),
+        from: old.from.parse().map_err(FromV6Error::BadDruidFromAddress)?,
+        to: old.to.parse().map_err(FromV6Error::BadDruidToAddress)?,
         asset: upgrade_v6_asset(&old.asset)?,
     })
 }
@@ -660,8 +664,8 @@ fn downgrade_v6_txout(old: &TxOut) -> Result<V6TxOut, ToV6Error> {
 
 fn downgrade_v6_druidexpectation(old: &DruidExpectation) -> Result<V6DruidExpectation, ToV6Error> {
     Ok(V6DruidExpectation {
-        from: old.from.clone(),
-        to: old.to.clone(),
+        from: old.from.to_string(),
+        to: old.to.to_string(),
         asset: downgrade_v6_asset(&old.asset)?,
     })
 }

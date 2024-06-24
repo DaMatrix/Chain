@@ -6,7 +6,7 @@ use crate::primitives::transaction::Transaction;
 use crate::utils::transaction_utils::construct_tx_ins_address;
 use std::collections::BTreeSet;
 use std::iter::Extend;
-use crate::primitives::address::AnyAddress;
+use crate::primitives::address::{AnyAddress, TxInsAddress};
 
 /// Verifies that all DDE transaction expectations are met for DRUID-matching transactions
 ///
@@ -36,7 +36,7 @@ pub fn druid_expectations_are_met<'a>(
                 for out in &tx.outputs {
                     match &out.script_public_key {
                         AnyAddress::P2PKH(p2pkh) =>
-                            tx_source.insert((ins.clone(), p2pkh.to_string(), &out.value)),
+                            tx_source.insert((ins.clone(), &out.script_public_key, &out.value)),
                         AnyAddress::Burn => false,
                     };
                 }
@@ -55,8 +55,8 @@ pub fn druid_expectations_are_met<'a>(
 ///
 /// * `e`           - The expectation to check on
 /// * `tx_source`   - The source transaction source to match against
-fn expectation_met(e: &DruidExpectation, tx_source: &BTreeSet<(String, String, &Asset)>) -> bool {
-    tx_source.contains(&(e.from.clone(), e.to.clone(), &e.asset))
+fn expectation_met(e: &DruidExpectation, tx_source: &BTreeSet<(TxInsAddress, &AnyAddress, &Asset)>) -> bool {
+    tx_source.contains(&(e.from.clone(), &e.to, &e.asset))
 }
 
 #[cfg(test)]
@@ -104,12 +104,12 @@ mod tests {
         let expects = vec![
             DruidExpectation {
                 from: from_addr.clone(),
-                to: bob_addr.to_string(),
+                to: bob_addr.clone(),
                 asset: alice_asset,
             },
             DruidExpectation {
                 from: from_addr,
-                to: alice_addr.to_string(),
+                to: alice_addr.clone(),
                 asset: bob_asset,
             },
         ];
@@ -167,7 +167,7 @@ mod tests {
 
             let expectation = DruidExpectation {
                 from: from_addr.clone(),
-                to: alice_addr.to_string(),
+                to: alice_addr.clone(),
                 asset: Asset::item(1, Some(genesis_hash.clone()), None),
             };
 
@@ -200,7 +200,7 @@ mod tests {
             let tx_ins = vec![];
             let expectation = DruidExpectation {
                 from: from_addr,
-                to: bob_addr.to_string(),
+                to: bob_addr.clone(),
                 asset: Asset::Token(payment),
             };
 
@@ -234,7 +234,7 @@ mod tests {
 
         let druid_info = change_tx.druid_info.clone();
         let mut expects = druid_info.unwrap().expectations;
-        expects[0].to = "60764505679457".to_string();
+        expects[0].to = P2PKHAddress::placeholder_indexed(60764505679457).wrap();
 
         // New druid info
         let nm_druid_info = DdeValues {

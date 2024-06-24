@@ -9,7 +9,7 @@ use crate::script::{OpCodes, ScriptEntry, StackEntry};
 use std::collections::BTreeMap;
 use std::convert::TryInto;
 use tracing::debug;
-use crate::primitives::address::{AnyAddress, P2PKHAddress};
+use crate::primitives::address::{AnyAddress, P2PKHAddress, TxInsAddress};
 use crate::primitives::format;
 
 pub struct ReceiverInfo {
@@ -201,13 +201,13 @@ pub fn construct_tx_ins_address(
     tx_version: TxVersion,
     tx_ins: &[TxIn],
     tx_outs: &[TxOut],
-) -> String {
+) -> TxInsAddress {
     let signable_tx_ins = tx_ins.iter()
         .enumerate()
         .map(|tx_in| get_tx_in_address_signable_string(tx_version, tx_in, tx_outs))
         .collect::<Vec<String>>()
         .join("-");
-    hex::encode(sha3_256::digest(signable_tx_ins.as_bytes()))
+    TxInsAddress::from_hash(sha3_256::digest(signable_tx_ins.as_bytes()))
 }
 
 /// Get all the hash to remove from UTXO set for the utxo_entries
@@ -1000,7 +1000,7 @@ mod tests {
         let participants = 2;
         let expects = vec![DruidExpectation {
             from: from_addr,
-            to: to_address.to_string(),
+            to: to_address.clone(),
             asset: data.clone(),
         }];
 
@@ -1050,7 +1050,7 @@ mod tests {
 
             let expectation = DruidExpectation {
                 from: from_addr.clone(),
-                to: alice_addr.to_string(),
+                to: alice_addr.clone(),
                 asset: Asset::item(1, Some(genesis_hash.clone()), None),
             };
 
@@ -1081,7 +1081,7 @@ mod tests {
             let tx_ins = vec![];
             let expectation = DruidExpectation {
                 from: from_addr,
-                to: bob_addr.to_string(),
+                to: bob_addr.clone(),
                 asset: Asset::Token(payment),
             };
 
@@ -1311,11 +1311,11 @@ mod tests {
 
         assert_eq!(
             actual_tx_ins_address,
-            hex::encode(sha3_256::digest(actual_tx_in_address_signable_strings.join("-").as_bytes())),
+            TxInsAddress::from_hash(sha3_256::digest(actual_tx_in_address_signable_strings.join("-").as_bytes())),
             "tx_ins_address_signable_string");
 
         assert_eq!(
-            &actual_tx_ins_address,
+            actual_tx_ins_address.to_string(),
             "2e647db8fbe885d3260bebf2e1ca05a2a69ce93443e4185b144b6ccb44d976b6",
             "tx_ins_address");
     }
