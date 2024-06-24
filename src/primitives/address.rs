@@ -1,6 +1,7 @@
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::str::FromStr;
+use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use crate::crypto::sha3_256;
 use crate::crypto::sign_ed25519::PublicKey;
@@ -10,7 +11,7 @@ use crate::utils::serialize_utils::FixedByteArray;
 pub const STANDARD_ADDRESS_BYTES : usize = sha3_256::HASH_LEN;
 
 /// A standard 32-byte address.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize, Encode, Decode)]
 #[serde(transparent)]
 struct StandardAddress(FixedByteArray<STANDARD_ADDRESS_BYTES>);
 
@@ -59,7 +60,7 @@ pub enum ParseAddressError {
 macro_rules! standard_address_type {
     ($doc:literal, $name:ident, $prefix:literal) => {
         #[doc = $doc]
-        #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
+        #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize, Encode, Decode)]
         #[serde(transparent)]
         pub struct $name { standard_address: StandardAddress }
 
@@ -107,11 +108,11 @@ impl P2PKHAddress {
 //standard_address_type!("The type of address used for P2SH outputs", P2SHAddress, "H");
 
 /// Wrapper enum representing an address of any type.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Encode, Decode)]
 pub enum AnyAddress {
+    Burn,
     P2PKH(P2PKHAddress),
     //P2SH(P2SHAddress),
-    Burn,
 }
 
 impl AnyAddress {

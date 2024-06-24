@@ -153,17 +153,7 @@ pub fn tx_is_valid_full<'a>(
         }
 
         // At this point `TxIn` will be valid
-        let tx_out_address = match tx_out.script_public_key.as_ref() {
-            // If script_public_key is unset, the output is effectively a burn output
-            None => AnyAddress::Burn,
-            Some(text_address) => match AnyAddress::from_str(text_address) {
-                Ok(address) => address,
-                Err(err) => return Err(TxValidationError::InvalidScriptPublicKey {
-                    previous_out: tx_out_point.clone(),
-                    cause: err,
-                }),
-            },
-        };
+        let tx_out_address = &tx_out.script_public_key;
 
         let tx_out_hash = construct_tx_in_signable_hash(tx_out_point);
         let full_tx_hash = construct_tx_in_out_signable_hash(
@@ -171,7 +161,7 @@ pub fn tx_is_valid_full<'a>(
 
         debug!("full_tx_hash: {:?}", full_tx_hash);
 
-        match (&tx_out_address, tx_in) {
+        match (tx_out_address, tx_in) {
             (AnyAddress::P2PKH(address), TxIn::P2PKH(p2pkh)) =>
                 tx_has_valid_p2pkh_sig(p2pkh, &full_tx_hash, address)
                     .map_err(TxValidationError::P2PKHInvalid)?,
@@ -221,21 +211,11 @@ pub fn tx_outs_are_valid_full(tx_outs: &[TxOut], fees: &[TxOut], tx_ins_spent: A
     let mut tx_outs_spent: AssetValues = Default::default();
 
     for tx_out in tx_outs {
-        // Addresses must have valid length
-        if let Some(addr) = &tx_out.script_public_key {
-            AnyAddress::from_str(addr.as_str()).map_err(TxValidationError::OutputAddressInvalid)?;
-        }
-
         tx_outs_spent.update_add(&tx_out.value);
     }
 
     // Check fees as well
     for fee in fees {
-        // Addresses must have valid length
-        if let Some(addr) = &fee.script_public_key {
-            AnyAddress::from_str(addr.as_str()).map_err(TxValidationError::OutputAddressInvalid)?;
-        }
-
         tx_outs_spent.update_add(&fee.value);
     }
 

@@ -19,7 +19,9 @@ use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::enc::write::Writer;
 use bincode::error::{AllowedEnumVariants, DecodeError, EncodeError};
+use serde::ser::SerializeStruct;
 use crate::crypto::sha3_256;
+use crate::primitives::address::AnyAddress;
 use crate::primitives::format::v6;
 
 make_ordinal_enum!(
@@ -95,7 +97,9 @@ const TX_HASH_LENGTH_BYTES : usize = TX_HASH_LENGTH / 2;
 #[derive(Clone, Eq, PartialEq, Hash, Ord, PartialOrd, Encode, Decode)]
 pub struct TxHash([u8; TX_HASH_LENGTH_BYTES]);
 
-make_error_type!(pub enum TxHashError {
+make_error_type!(
+#[derive(PartialEq)]
+pub enum TxHashError {
     BadByteCount(size: usize); "Transaction hash needs {TX_HASH_LENGTH_BYTES} bytes, got {size}",
     BadZeroBits; "Transaction hash must end with four zero bits",
 
@@ -258,11 +262,13 @@ pub enum TxInConstructor<'a> {
     },
 }
 
+/// A Coinbase transaction input.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Encode, Decode)]
 pub struct CoinbaseTxIn {
     pub block_number: u64,
 }
 
+/// An asset creation transaction input.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Encode, Decode)]
 pub struct CreateTxIn {
     pub block_number: u64,
@@ -271,6 +277,7 @@ pub struct CreateTxIn {
     pub signature: Signature,
 }
 
+/// A P2PKH redeem transaction input.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Encode, Decode)]
 pub struct P2PKHTxIn {
     pub previous_out: OutPoint,
@@ -278,6 +285,8 @@ pub struct P2PKHTxIn {
     pub signature: Signature,
 }
 
+/// A generic transaction input.
+/// This can any of the supported kinds of transaction inputs.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Encode, Decode)]
 pub enum TxIn {
     Coinbase(CoinbaseTxIn),
@@ -376,59 +385,96 @@ impl<'a> TryFrom<&'a TxIn> for &'a P2PKHTxIn {
 /// An output of a transaction. It contains the public key that the next input
 /// must be able to sign with to claim it. It also contains the block hash for the
 /// potential DRS if this is a data asset transaction
-#[derive(Default, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Encode, Decode)]
+#[derive(Clone, Debug, Eq, PartialEq, Encode, Decode)]
 pub struct TxOut {
     pub value: Asset,
     pub locktime: u64,
-    pub script_public_key: Option<String>,
+    pub script_public_key: AnyAddress,
 }
 
 impl TxOut {
-    /// Creates a new TxOut instance
-    pub fn new() -> TxOut {
-        Default::default()
-    }
-
+    #[deprecated = "Use new_token_amount_v2"]
     pub fn new_token_amount(
         to_address: String,
         amount: TokenAmount,
         locktime: Option<u64>,
     ) -> TxOut {
-        TxOut {
-            value: Asset::Token(amount),
-            locktime: locktime.unwrap_or(ZERO as u64),
-            script_public_key: Some(to_address),
-        }
+        Self::new_asset(to_address, Asset::Token(amount), locktime)
     }
 
     /// Creates a new TxOut instance for a `Item` asset
     ///
     /// **NOTE:** Only create transactions may have `Item` assets that have a `None` `genesis_hash`
+    #[deprecated = "Use new_item_amount_v2"]
     pub fn new_item_amount(to_address: String, item: ItemAsset, locktime: Option<u64>) -> TxOut {
-        TxOut {
-            value: Asset::Item(item),
-            locktime: locktime.unwrap_or(ZERO as u64),
-            script_public_key: Some(to_address),
-        }
+        Self::new_asset(to_address, Asset::Item(item), locktime)
+    }
+
+    #[deprecated = "Use new_asset_v2"]
+    pub fn new_asset(to_address: String, asset: Asset, locktime: Option<u64>) -> TxOut {
+        Self::new_asset_v2(to_address.parse().expect(&to_address), asset, locktime)
+    }
+
+    pub fn new_token_amount_v2(to_address: AnyAddress, amount: TokenAmount, locktime: Option<u64>) -> TxOut {
+        Self::new_asset_v2(to_address, Asset::Token(amount), locktime)
+    }
+
+    /// Creates a new TxOut instance for a `Item` asset
+    ///
+    /// **NOTE:** Only create transactions may have `Item` assets that have a `None` `genesis_hash`
+    pub fn new_item_amount_v2(to_address: AnyAddress, item: ItemAsset, locktime: Option<u64>) -> TxOut {
+        Self::new_asset_v2(to_address, Asset::Item(item), locktime)
     }
 
     //TODO: Add handling for `Data' asset variant
-    pub fn new_asset(to_address: String, asset: Asset, locktime: Option<u64>) -> TxOut {
-        match asset {
-            Asset::Token(amount) => TxOut::new_token_amount(to_address, amount, locktime),
-            Asset::Item(item) => TxOut::new_item_amount(to_address, item, locktime),
-            _ => panic!("Cannot create TxOut for asset of type {:?}", asset),
+    pub fn new_asset_v2(to_address: AnyAddress, asset: Asset, locktime: Option<u64>) -> TxOut {
+        assert!(matches!(asset, Asset::Item(_) | Asset::Token(_)),
+                "Cannot create TxOut for asset of type {:?}", asset);
+        TxOut {
+            value: asset,
+            locktime: locktime.unwrap_or(ZERO as u64),
+            script_public_key: to_address,
         }
     }
+}
 
-    /// Returns whether current tx_out is a P2SH
-    pub fn is_p2sh_tx_out(&self) -> bool {
-        if let Some(pk) = &self.script_public_key {
-            let pk_bytes = pk.as_bytes();
-            return pk_bytes[0] == P2SH_PREPEND;
+impl Serialize for TxOut {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        assert!(serializer.is_human_readable(), "serializer must be human-readable!");
+
+        let mut state = Serializer::serialize_struct(serializer, "TxOut", false as usize + 1 + 1 + 1)?;
+        state.serialize_field("value", &self.value)?;
+        state.serialize_field("locktime", &self.locktime)?;
+
+        let script_public_key = match &self.script_public_key {
+            AnyAddress::P2PKH(_) => Some(self.script_public_key.to_string()),
+            AnyAddress::Burn => None,
+        };
+        state.serialize_field("script_public_key", &script_public_key)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for TxOut {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        assert!(deserializer.is_human_readable(), "deserializer must be human-readable!");
+
+        #[derive(Deserialize)]
+        struct JsonTxOut {
+            value: Asset,
+            locktime: u64,
+            script_public_key: Option<String>,
         }
 
-        false
+        let json : JsonTxOut = serde::Deserialize::deserialize(deserializer)?;
+        Ok(TxOut {
+            value: json.value,
+            locktime: json.locktime,
+            script_public_key: match json.script_public_key {
+                None => AnyAddress::Burn,
+                Some(address) => address.parse().map_err(<D::Error as serde::de::Error>::custom)?,
+            }
+        })
     }
 }
 
@@ -520,6 +566,7 @@ impl Transaction {
 
 #[cfg(test)]
 mod tests {
+    use crate::primitives::address::P2PKHAddress;
     use crate::utils::serialize_utils::{bincode_decode_from_slice_standard_full, bincode_encode_to_vec_standard};
     use super::*;
 
@@ -562,5 +609,50 @@ mod tests {
         let json = serde_json::to_string(&hash).unwrap();
         assert_eq!(json, "\"g48dda5bbe9171a6656206ec56c595c5\"");
         assert_eq!(serde_json::from_str::<TxHash>(&json).unwrap(), hash);
+    }
+
+    #[test]
+    fn test_tx_out_bincode() {
+        let tx_out = TxOut {
+            value: Asset::Token(TokenAmount(1337)),
+            locktime: 123,
+            script_public_key: AnyAddress::P2PKH(P2PKHAddress::placeholder()),
+        };
+        let serialized = bincode_encode_to_vec_standard(&tx_out).unwrap();
+        assert_eq!(hex::encode(&serialized), "00fb39057b0148dda5bbe9171a6656206ec56c595c5834b6cf38c5fe71bcb44fe43833aee9df");
+        let deserialized : TxOut = bincode_decode_from_slice_standard_full(&serialized).unwrap();
+        assert_eq!(deserialized, tx_out);
+
+        let tx_out = TxOut {
+            value: Asset::Token(TokenAmount(1337)),
+            locktime: 123,
+            script_public_key: AnyAddress::Burn,
+        };
+        let serialized = bincode_encode_to_vec_standard(&tx_out).unwrap();
+        assert_eq!(hex::encode(&serialized), "00fb39057b00");
+        let deserialized : TxOut = bincode_decode_from_slice_standard_full(&serialized).unwrap();
+        assert_eq!(deserialized, tx_out);
+    }
+
+    #[test]
+    fn test_tx_out_serdejson() {
+        let tx_out = TxOut {
+            value: Asset::Token(TokenAmount(1337)),
+            locktime: 123,
+            script_public_key: AnyAddress::P2PKH(P2PKHAddress::placeholder()),
+        };
+        let json = serde_json::to_string(&tx_out).unwrap();
+        assert_eq!(json, "{\"value\":{\"Token\":1337},\"locktime\":123,\"script_public_key\":\"48dda5bbe9171a6656206ec56c595c5834b6cf38c5fe71bcb44fe43833aee9df\"}");
+        assert_eq!(serde_json::from_str::<TxOut>(&json).unwrap(), tx_out);
+
+        let tx_out = TxOut {
+            value: Asset::Token(TokenAmount(1337)),
+            locktime: 123,
+            script_public_key: AnyAddress::Burn,
+        };
+        let json = serde_json::to_string(&tx_out).unwrap();
+        assert_eq!(json, "{\"value\":{\"Token\":1337},\"locktime\":123,\"script_public_key\":null}");
+        assert_eq!(serde_json::from_str::<TxOut>(&json).unwrap(), tx_out);
+        assert_eq!(serde_json::from_str::<TxOut>("{\"value\":{\"Token\":1337},\"locktime\":123}").unwrap(), tx_out);
     }
 }

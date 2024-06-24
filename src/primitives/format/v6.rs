@@ -1,7 +1,9 @@
 use std::convert::TryInto;
+use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use crate::crypto::{sha3_256, sign_ed25519};
 use crate::crypto::sign_ed25519::{PublicKey, Signature};
+use crate::primitives::address::{AnyAddress, ParseAddressError};
 use crate::primitives::asset::{Asset, ItemAsset, TokenAmount};
 use crate::primitives::druid::{DdeValues, DruidExpectation};
 use crate::primitives::transaction::*;
@@ -253,6 +255,9 @@ make_error_type!(pub enum FromV6Error {
         "transaction contained invalid transaction hash: {cause}"; cause,
     BadOutPointIndex(index: i32); "negative outpoint index: {index}",
 
+    BadAddress(script_public_key: String, cause: ParseAddressError);
+        "transaction contained invalid script_public_key \"{script_public_key}\": {cause}"; cause,
+
     BadScriptPattern(script: String); "unknown v6 script format: {script}",
     HasPreviousOut(pattern_type: &'static str);
         "{pattern_type} transaction input must not have a previous_out",
@@ -483,7 +488,14 @@ fn upgrade_v6_txout(old: &V6TxOut) -> Result<TxOut, FromV6Error> {
     Ok(TxOut {
         value: upgrade_v6_asset(&old.value)?,
         locktime: old.locktime,
-        script_public_key: old.script_public_key.clone(),
+        script_public_key: match &old.script_public_key {
+            // If script_public_key is unset, the output is effectively a burn output
+            None => AnyAddress::Burn,
+            Some(text_address) => match AnyAddress::from_str(text_address) {
+                Ok(address) => address,
+                Err(err) => return Err(FromV6Error::BadAddress(text_address.clone(), err)),
+            },
+        },
     })
 }
 
@@ -552,6 +564,9 @@ make_error_type!(pub enum ToV6Error {
         "script contained invalid hex bytes: \"{bytes}\": {cause}"; cause,
     CantDecodeScript(cause: ScriptError); "failed to decode script: {cause}"; cause,
     BadScript; "script doesn't match any known v6 patterns",
+
+    BadAddress(address: AnyAddress);
+        "{} address \"{address}\" cannot be converted to v6" (address.sort()),
 
     BadOutPointIndex(index: u32); "outpoint index too high: {index}",
     BadP2PKHSignature; "P2PKH TxIn signature doesn't match any known pattern",
@@ -630,7 +645,10 @@ fn downgrade_v6_txout(old: &TxOut) -> Result<V6TxOut, ToV6Error> {
     Ok(V6TxOut {
         value: downgrade_v6_asset(&old.value)?,
         locktime: old.locktime,
-        script_public_key: old.script_public_key.clone(),
+        script_public_key: match &old.script_public_key {
+            AnyAddress::P2PKH(p2pkh) => Some(p2pkh.to_string()),
+            AnyAddress::Burn => None,
+        },
     })
 }
 
@@ -771,10 +789,12 @@ mod tests {
     use super::*;
 
     use std::collections::BTreeMap;
+    use std::str::from_utf8;
     use once_cell::sync::Lazy;
     use crate::constants::STANDARD_ADDRESS_LENGTH_BYTES;
     use crate::crypto::sign_ed25519;
     use crate::crypto::sign_ed25519::{PublicKey, SecretKey};
+    use crate::primitives::address::P2PKHAddress;
     use crate::primitives::asset::{Asset, AssetValues, ItemAsset, TokenAmount};
     use crate::primitives::transaction::{OutPoint, Transaction, TxConstructor, TxIn};
     use crate::utils::{script_utils, transaction_utils};
@@ -831,7 +851,7 @@ mod tests {
         assert_eq!(Asset::Token(tokens), payment_tx.outputs[0].value);
         assert_eq!(
             payment_tx.outputs[0].script_public_key,
-            Some(hex::encode(&[0u8; STANDARD_ADDRESS_LENGTH_BYTES]))
+            AnyAddress::P2PKH(hex::encode(&[0u8; STANDARD_ADDRESS_LENGTH_BYTES]).parse().unwrap())
         );
 
         let tx_ins_spent = AssetValues::new(tokens, BTreeMap::new());

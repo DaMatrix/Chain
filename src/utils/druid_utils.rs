@@ -6,6 +6,7 @@ use crate::primitives::transaction::Transaction;
 use crate::utils::transaction_utils::construct_tx_ins_address;
 use std::collections::BTreeSet;
 use std::iter::Extend;
+use crate::primitives::address::AnyAddress;
 
 /// Verifies that all DDE transaction expectations are met for DRUID-matching transactions
 ///
@@ -33,9 +34,11 @@ pub fn druid_expectations_are_met<'a>(
                 info!("Expectations: {:?}", expects);
 
                 for out in &tx.outputs {
-                    if let Some(pk) = &out.script_public_key {
-                        tx_source.insert((ins.clone(), pk, &out.value));
-                    }
+                    match &out.script_public_key {
+                        AnyAddress::P2PKH(p2pkh) =>
+                            tx_source.insert((ins.clone(), p2pkh.to_string(), &out.value)),
+                        AnyAddress::Burn => false,
+                    };
                 }
                 info!("Tx Source: {:?}", tx_source);
             }
@@ -52,8 +55,8 @@ pub fn druid_expectations_are_met<'a>(
 ///
 /// * `e`           - The expectation to check on
 /// * `tx_source`   - The source transaction source to match against
-fn expectation_met(e: &DruidExpectation, tx_source: &BTreeSet<(String, &String, &Asset)>) -> bool {
-    tx_source.get(&(e.from.clone(), &e.to, &e.asset)).is_some()
+fn expectation_met(e: &DruidExpectation, tx_source: &BTreeSet<(String, String, &Asset)>) -> bool {
+    tx_source.contains(&(e.from.clone(), e.to.clone(), &e.asset))
 }
 
 #[cfg(test)]
@@ -63,7 +66,7 @@ mod tests {
 
     use super::*;
     use crate::crypto::sign_ed25519::{self as sign};
-    use crate::primitives::address::P2PKHAddress;
+    use crate::primitives::address::{AnyAddress, P2PKHAddress};
     use crate::primitives::asset::{Asset, ItemAsset, TokenAmount};
     use crate::primitives::druid::{DdeValues, DruidExpectation};
     use crate::primitives::transaction::*;
@@ -94,17 +97,8 @@ mod tests {
         let bob_addr = P2PKHAddress::placeholder_indexed(1).to_string();
 
         // TxOuts
-        let token_tx_out = TxOut {
-            value: alice_asset.clone(),
-            script_public_key: Some(bob_addr.clone()),
-            ..Default::default()
-        };
-
-        let data_tx_out = TxOut {
-            value: bob_asset.clone(),
-            script_public_key: Some(alice_addr.clone()),
-            ..Default::default()
-        };
+        let token_tx_out = TxOut::new_asset(bob_addr.clone(), alice_asset.clone(), None);
+        let data_tx_out = TxOut::new_asset(alice_addr.clone(), bob_asset.clone(), None);
 
         // Expectations (from addresses the same due to empty TxIn)
         let expects = vec![
@@ -285,7 +279,7 @@ mod tests {
     /// Checks that item-based payments with non-matching addresses fail
     fn should_fail_rb_payment_addr_mismatch() {
         let (send_tx, mut recv_tx) = create_rb_payment_txs();
-        recv_tx.outputs[0].script_public_key = Some("11145".to_string());
+        recv_tx.outputs[0].script_public_key = AnyAddress::P2PKH(P2PKHAddress::placeholder_indexed(1337));
 
         // Non-matching address expectation
         assert!(!druid_expectations_are_met(

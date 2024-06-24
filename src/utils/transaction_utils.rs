@@ -181,14 +181,13 @@ fn get_tx_in_address_signable_string(
                         hex::encode(asset_hash),
                         hex::encode(signature.as_ref()),
                         hex::encode(public_key.as_ref())),
-            TxIn::P2PKH(P2PKHTxIn { previous_out, public_key, signature }) =>
+            TxIn::P2PKH(p2pkh) =>
                 format!("{}-Bytes:{}-Signature:{}-PubKey:{}-Op:OP_DUP-Op:OP_HASH256-Bytes:{}-Op:OP_EQUALVERIFY-Op:OP_CHECKSIG",
-                        get_out_point_signable_string(previous_out),
-                        format::v6::find_v6_p2pkh_check_data(
-                            tx_in.try_into().unwrap(), tx_outs).unwrap(),
-                        hex::encode(signature.as_ref()),
-                        hex::encode(public_key.as_ref()),
-                        hex::encode(sha3_256::digest(public_key.as_ref()))),
+                        get_out_point_signable_string(&p2pkh.previous_out),
+                        format::v6::find_v6_p2pkh_check_data(p2pkh, tx_outs).unwrap(),
+                        hex::encode(p2pkh.signature.as_ref()),
+                        hex::encode(p2pkh.public_key.as_ref()),
+                        hex::encode(sha3_256::digest(p2pkh.public_key.as_ref()))),
         }
     }
 }
@@ -377,11 +376,7 @@ pub fn construct_item_create_tx(
     let receiver_address = construct_address(&public_key);
 
     let tx_ins = construct_create_tx_in(block_num, &asset, public_key, secret_key);
-    let tx_out = TxOut {
-        value: asset,
-        script_public_key: Some(receiver_address),
-        ..Default::default()
-    };
+    let tx_out = TxOut::new_asset(receiver_address, asset, None);
 
     construct_tx_core(tx_ins, vec![tx_out], fee)
 }
@@ -405,11 +400,7 @@ pub fn construct_payment_tx(
     locktime: u64,
     key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>
 ) -> Transaction {
-    let tx_out = TxOut {
-        value: receiver.asset,
-        locktime,
-        script_public_key: Some(receiver.address),
-    };
+    let tx_out = TxOut::new_asset(receiver.address, receiver.asset, Some(locktime));
     let tx_outs = vec![tx_out];
     let final_tx_ins = update_input_signatures(&tx_ins, &tx_outs, key_material);
 
@@ -430,11 +421,7 @@ pub fn construct_burn_tx(
 ) -> Transaction {
     todo!();
 
-    let tx_out = TxOut {
-        value,
-        locktime: 0,
-        script_public_key: None,
-    };
+    let tx_out = TxOut::new_asset_v2(AnyAddress::Burn, value, None);
     let tx_outs = vec![tx_out];
 
     let final_tx_ins = update_input_signatures(&tx_ins, &tx_outs, key_material);
@@ -460,11 +447,7 @@ pub fn construct_tx_core(
     fee: Option<ReceiverInfo>
 ) -> Transaction {
     let fee_tx_out = match fee {
-        Some(fee) => vec![TxOut {
-            value: fee.asset,
-            locktime: 0,
-            script_public_key: Some(fee.address),
-        }],
+        Some(fee) => vec![TxOut::new_asset(fee.address, fee.asset, None)],
         None => vec![],
     };
 
@@ -562,11 +545,7 @@ pub fn construct_rb_payments_send_tx(
     druid_info: DdeValues,
     key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>
 ) -> Transaction {
-    let out = TxOut {
-        value: receiver.asset,
-        locktime,
-        script_public_key: Some(receiver.address),
-    };
+    let out = TxOut::new_asset(receiver.address, receiver.asset, Some(locktime));
     tx_outs.push(out);
     construct_rb_tx_core(
         tx_ins,
@@ -599,11 +578,7 @@ pub fn construct_rb_receive_payment_tx(
     druid_info: DdeValues,
     key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>
 ) -> Transaction {
-    let out = TxOut {
-        value: Asset::item(1, druid_info.genesis_hash, None),
-        locktime,
-        script_public_key: Some(sender_address),
-    };
+    let out = TxOut::new_asset(sender_address, Asset::item(1, druid_info.genesis_hash, None), Some(locktime));
     tx_outs.push(out);
     construct_rb_tx_core(
         tx_ins,
@@ -808,7 +783,7 @@ mod tests {
         assert_eq!(Asset::Token(token_amount), payment_tx.outputs[0].value);
         assert_eq!(
             payment_tx.outputs[0].script_public_key,
-            Some(hex::encode(vec![0; 32]))
+            hex::encode(vec![0u8; 32]).parse().unwrap(),
         );
     }
 
@@ -1007,18 +982,14 @@ mod tests {
         let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs();
         let prev_out = OutPoint::new_from_hash(TxHash::placeholder(), 0);
 
-        let to_asset = "2222".to_owned();
+        let to_address = AnyAddress::P2PKH(P2PKHAddress::placeholder());
         let data = Asset::Item(ItemAsset {
             metadata: Some("hello".to_string()),
             amount: 1,
             genesis_hash: None,
         });
 
-        let tx_outs = vec![TxOut {
-            value: data.clone(),
-            script_public_key: Some(to_asset.clone()),
-            ..Default::default()
-        }];
+        let tx_outs = vec![TxOut::new_asset_v2(to_address, data.clone(), None)];
 
         let signed_tx_ins = update_input_signatures(&tx_ins, &tx_outs, &key_material);
         let from_addr = construct_tx_ins_address(TxVersion::V6, &signed_tx_ins, &tx_outs);
@@ -1028,7 +999,7 @@ mod tests {
         let participants = 2;
         let expects = vec![DruidExpectation {
             from: from_addr,
-            to: to_asset,
+            to: to_address.to_string(),
             asset: data.clone(),
         }];
 
