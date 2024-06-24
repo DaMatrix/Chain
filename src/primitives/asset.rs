@@ -318,7 +318,7 @@ impl Asset {
 pub struct AssetValues {
     pub tokens: TokenAmount,
     // Note: Items from create transactions will have `genesis_hash` = `t_hash`
-    pub items: BTreeMap<String, u64>, /* `genesis_hash` - amount */
+    pub items: BTreeMap<TxHash, u64>, /* `genesis_hash` - amount */
 }
 
 impl ops::AddAssign for AssetValues {
@@ -329,7 +329,7 @@ impl ops::AddAssign for AssetValues {
 }
 
 impl AssetValues {
-    pub fn new(tokens: TokenAmount, items: BTreeMap<String, u64>) -> Self {
+    pub fn new(tokens: TokenAmount, items: BTreeMap<TxHash, u64>) -> Self {
         Self { tokens, items }
     }
 
@@ -337,7 +337,7 @@ impl AssetValues {
         AssetValues::new(TokenAmount(tokens), Default::default())
     }
 
-    pub fn item(items: BTreeMap<String, u64>) -> Self {
+    pub fn item(items: BTreeMap<TxHash, u64>) -> Self {
         AssetValues::new(TokenAmount(0), items)
     }
 
@@ -356,7 +356,7 @@ impl AssetValues {
             Asset::Item(items) => {
                 if let Some(genesis_hash) = &items.genesis_hash {
                     self.items
-                        .get(&genesis_hash.to_string())
+                        .get(genesis_hash)
                         .map_or(false, |amount| *amount >= items.amount)
                 } else {
                     false
@@ -372,7 +372,7 @@ impl AssetValues {
             Asset::Item(items) => {
                 if let Some(genesis_hash) = &items.genesis_hash {
                     self.items
-                        .entry(genesis_hash.to_string())
+                        .entry(genesis_hash.clone())
                         .and_modify(|amount| *amount += items.amount)
                         .or_insert(items.amount);
                 }
@@ -387,7 +387,7 @@ impl AssetValues {
             Asset::Item(items) => {
                 items.genesis_hash.as_ref().and_then(|genesis_hash| {
                     self.items
-                        .get_mut(&genesis_hash.to_string())
+                        .get_mut(genesis_hash)
                         .map(|amount| *amount -= items.amount)
                 });
             }

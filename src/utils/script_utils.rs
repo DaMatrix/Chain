@@ -3170,10 +3170,10 @@ mod tests {
             Err(TxValidationError::InconsistentInputAndOutputValue {
                 input_value: AssetValues::new(
                     TokenAmount(0),
-                    BTreeMap::from([(genesis_hash_1.clone().to_string(), 3), (genesis_hash_2.clone().to_string(), 2)])),
+                    BTreeMap::from([(genesis_hash_1.clone(), 3), (genesis_hash_2.clone(), 2)])),
                 output_value: AssetValues::new(
                     TokenAmount(0),
-                    BTreeMap::from([(genesis_hash_1.clone().to_string(), 3), (genesis_hash_2.clone().to_string(), 3)])),
+                    BTreeMap::from([(genesis_hash_1.clone(), 3), (genesis_hash_2.clone(), 3)])),
             }),
         );
     }
@@ -3204,10 +3204,10 @@ mod tests {
             Err(TxValidationError::InconsistentInputAndOutputValue {
                 input_value: AssetValues::new(
                     TokenAmount(0),
-                    BTreeMap::from([(genesis_hash_1.clone().to_string(), 3), (genesis_hash_2.clone().to_string(), 2)])),
+                    BTreeMap::from([(genesis_hash_1.clone(), 3), (genesis_hash_2.clone(), 2)])),
                 output_value: AssetValues::new(
                     TokenAmount(0),
-                    BTreeMap::from([(genesis_hash_1.clone().to_string(), 3), (invalid_genesis_hash.clone().to_string(), 2)])),
+                    BTreeMap::from([(genesis_hash_1.clone(), 3), (invalid_genesis_hash.clone(), 2)])),
             }),
         );
     }
@@ -3249,10 +3249,10 @@ mod tests {
             Err(TxValidationError::InconsistentInputAndOutputValue {
                 input_value: AssetValues::new(
                     TokenAmount(2),
-                    BTreeMap::from([(genesis_hash.clone().to_string(), 3)])),
+                    BTreeMap::from([(genesis_hash.clone(), 3)])),
                 output_value: AssetValues::new(
                     TokenAmount(2),
-                    BTreeMap::from([(genesis_hash.clone().to_string(), 2)])),
+                    BTreeMap::from([(genesis_hash.clone(), 2)])),
             }),
         );
     }
@@ -3285,10 +3285,10 @@ mod tests {
             Err(TxValidationError::InconsistentInputAndOutputValue {
                 input_value: AssetValues::new(
                     TokenAmount(2),
-                    BTreeMap::from([(genesis_hash.clone().to_string(), 3)])),
+                    BTreeMap::from([(genesis_hash.clone(), 3)])),
                 output_value: AssetValues::new(
                     TokenAmount(1),
-                    BTreeMap::from([(invalid_genesis_hash.clone().to_string(), 1)])),
+                    BTreeMap::from([(invalid_genesis_hash.clone(), 1)])),
             }),
         );
     }

@@ -923,7 +923,7 @@ mod tests {
 
         let tx_ins_spent = AssetValues::new(
             TokenAmount(0),
-            BTreeMap::from([(drs_tx_hash.to_string(), 1000)]));
+            BTreeMap::from([(drs_tx_hash.clone(), 1000)]));
         assert!(script_utils::tx_outs_are_valid(
             &payment_tx_valid.outputs,
             &payment_tx_valid.fees,
@@ -958,7 +958,7 @@ mod tests {
 
         let tx_ins_spent = AssetValues::new(
             fees,
-            BTreeMap::from([(drs_tx_hash.to_string(), 1000)]));
+            BTreeMap::from([(drs_tx_hash.clone(), 1000)]));
         assert!(script_utils::tx_outs_are_valid(
             &payment_tx_valid.outputs,
             &payment_tx_valid.fees,

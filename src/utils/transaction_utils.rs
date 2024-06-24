@@ -870,7 +870,7 @@ mod tests {
         );
 
         let btree = BTreeMap::from([
-            (drs_tx_hash.to_string(), 1000),
+            (drs_tx_hash.clone(), 1000),
         ]);
         let tx_ins_spent = AssetValues::new(fees, btree);
 
@@ -901,7 +901,7 @@ mod tests {
         );
 
         let btree = BTreeMap::from([
-            ( genesis_hash.to_string(), 1000 ),
+            ( genesis_hash.clone(), 1000 ),
         ]);
         let tx_ins_spent = AssetValues::new(TokenAmount(0), btree);
 
