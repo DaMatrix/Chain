@@ -257,6 +257,8 @@ make_error_type!(pub enum FromV6Error {
 
     BadAddress(script_public_key: String, cause: ParseAddressError);
         "transaction contained invalid script_public_key \"{script_public_key}\": {cause}"; cause,
+    BadItemGenesisHash(cause: TxHashError);
+        "create transaction contained invalid genesis_hash: {cause}"; cause,
 
     BadScriptPattern(script: String); "unknown v6 script format: {script}",
     HasPreviousOut(pattern_type: &'static str);
@@ -277,7 +279,9 @@ fn upgrade_v6_asset(old: &V6Asset) -> Result<Asset, FromV6Error> {
         V6Asset::Item(V6ItemAsset { amount, genesis_hash, metadata, }) =>
             Ok(Asset::Item(ItemAsset {
                 amount: *amount,
-                genesis_hash: genesis_hash.clone(),
+                genesis_hash: genesis_hash.as_ref()
+                    .map(|hash| hash.parse().map_err(FromV6Error::BadItemGenesisHash))
+                    .transpose()?,
                 metadata: metadata.clone(),
             })),
     }
@@ -581,7 +585,7 @@ fn downgrade_v6_asset(old: &Asset) -> Result<V6Asset, ToV6Error> {
         Asset::Item(ItemAsset { amount, genesis_hash, metadata, }) =>
             Ok(V6Asset::Item(V6ItemAsset {
                 amount: *amount,
-                genesis_hash: genesis_hash.clone(),
+                genesis_hash: genesis_hash.as_ref().map(TxHash::to_string),
                 metadata: metadata.clone(),
             })),
     }
@@ -903,7 +907,7 @@ mod tests {
     fn test_item_onspend() {
         let (tx_ins, key_material) = test_construct_valid_inputs();
 
-        let drs_tx_hash = "gb875632ccf606eef2397124e6c2febf".to_string();
+        let drs_tx_hash : TxHash = "gb875632ccf606eef2397124e6c2febf".parse().unwrap();
         let item_asset_valid = ItemAsset::new(1000, Some(drs_tx_hash.clone()), None);
 
         let payment_tx_valid = transaction_utils::construct_payment_tx(
@@ -919,7 +923,7 @@ mod tests {
 
         let tx_ins_spent = AssetValues::new(
             TokenAmount(0),
-            BTreeMap::from([(drs_tx_hash, 1000)]));
+            BTreeMap::from([(drs_tx_hash.to_string(), 1000)]));
         assert!(script_utils::tx_outs_are_valid(
             &payment_tx_valid.outputs,
             &payment_tx_valid.fees,
@@ -935,7 +939,7 @@ mod tests {
         let fees = TokenAmount(1000);
         let (tx_ins, key_material) = test_construct_valid_inputs();
 
-        let drs_tx_hash = "gb875632ccf606eef2397124e6c2febf".to_string();
+        let drs_tx_hash : TxHash = "gb875632ccf606eef2397124e6c2febf".parse().unwrap();
         let item_asset_valid = ItemAsset::new(1000, Some(drs_tx_hash.clone()), None);
 
         let payment_tx_valid = transaction_utils::construct_payment_tx(
@@ -954,7 +958,7 @@ mod tests {
 
         let tx_ins_spent = AssetValues::new(
             fees,
-            BTreeMap::from([(drs_tx_hash, 1000)]));
+            BTreeMap::from([(drs_tx_hash.to_string(), 1000)]));
         assert!(script_utils::tx_outs_are_valid(
             &payment_tx_valid.outputs,
             &payment_tx_valid.fees,

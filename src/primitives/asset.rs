@@ -1,4 +1,4 @@
-use crate::primitives::transaction::OutPoint;
+use crate::primitives::transaction::{OutPoint, TxHash};
 use crate::utils::{add_btreemap, format_for_display};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fmt, iter, mem::size_of, ops};
@@ -15,6 +15,9 @@ impl fmt::Display for TokenAmount {
     }
 }
 
+// TODO: These should probably only implement checked arithmetic operations: it would be bad for
+//       tokens to be deleted because the addition overflowed and ended up saturating to u64::MAX
+//       instead of indicating a meaningful error
 impl ops::Add for TokenAmount {
     type Output = Self;
 
@@ -105,12 +108,13 @@ impl iter::Sum for TokenAmount {
 #[derive(Default, Deserialize, Serialize, Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Encode, Decode)]
 pub struct ItemAsset {
     pub amount: u64,
-    pub genesis_hash: Option<String>,
+    pub genesis_hash: Option<TxHash>,
+    // TODO: This is only allowed during asset creation, move it out of ItemAsset?
     pub metadata: Option<String>,
 }
 
 impl ItemAsset {
-    pub fn new(amount: u64, genesis_hash: Option<String>, metadata: Option<String>) -> Self {
+    pub fn new(amount: u64, genesis_hash: Option<TxHash>, metadata: Option<String>) -> Self {
         Self {
             amount,
             genesis_hash,
@@ -142,14 +146,14 @@ impl Asset {
     pub fn with_fixed_hash(mut self, out_point: &OutPoint) -> Self {
         if let Asset::Item(ref mut item_asset) = self {
             if item_asset.genesis_hash.is_none() {
-                item_asset.genesis_hash = Some(out_point.t_hash.to_string());
+                item_asset.genesis_hash = Some(out_point.t_hash.clone());
             }
         }
         self
     }
 
     /// Get optional `genesis_hash` value for `Asset`
-    pub fn get_genesis_hash(&self) -> Option<&String> {
+    pub fn get_genesis_hash(&self) -> Option<&TxHash> {
         match self {
             Asset::Token(_) => None,
             Asset::Item(item) => item.genesis_hash.as_ref(),
@@ -160,13 +164,6 @@ impl Asset {
         match self {
             Asset::Token(_) => None,
             Asset::Item(item) => item.metadata.as_ref(),
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        match self {
-            Asset::Token(_) => size_of::<TokenAmount>(),
-            Asset::Item(_) => size_of::<u64>(),
         }
     }
 
@@ -181,7 +178,7 @@ impl Asset {
         Asset::Token(TokenAmount(amount))
     }
 
-    pub fn item(amount: u64, genesis_hash: Option<String>, metadata: Option<String>) -> Self {
+    pub fn item(amount: u64, genesis_hash: Option<TxHash>, metadata: Option<String>) -> Self {
         Asset::Item(ItemAsset::new(amount, genesis_hash, metadata))
     }
 
@@ -359,7 +356,7 @@ impl AssetValues {
             Asset::Item(items) => {
                 if let Some(genesis_hash) = &items.genesis_hash {
                     self.items
-                        .get(genesis_hash)
+                        .get(&genesis_hash.to_string())
                         .map_or(false, |amount| *amount >= items.amount)
                 } else {
                     false
@@ -375,7 +372,7 @@ impl AssetValues {
             Asset::Item(items) => {
                 if let Some(genesis_hash) = &items.genesis_hash {
                     self.items
-                        .entry(genesis_hash.clone())
+                        .entry(genesis_hash.to_string())
                         .and_modify(|amount| *amount += items.amount)
                         .or_insert(items.amount);
                 }
@@ -390,7 +387,7 @@ impl AssetValues {
             Asset::Item(items) => {
                 items.genesis_hash.as_ref().and_then(|genesis_hash| {
                     self.items
-                        .get_mut(genesis_hash)
+                        .get_mut(&genesis_hash.to_string())
                         .map(|amount| *amount -= items.amount)
                 });
             }

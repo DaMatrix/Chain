@@ -3157,19 +3157,23 @@ mod tests {
     /// 2. Outputs contain `TxOut`s for `Item`s of amount `3` and `3`
     /// 3. `TxIn` DRS matches `TxOut` DRS for `Item`s; Amount of `Item`s spent does not match    
     fn test_tx_drs_items_only_failure_amount_mismatch() {
+        let genesis_hash_1 = TxHash::placeholder_indexed(1);
+        let genesis_hash_2 = TxHash::placeholder_indexed(2);
+        let genesis_hash_3 = TxHash::placeholder_indexed(3);
+
         test_tx_drs_common(
             &[
-                (3, Some("genesis_hash_1"), None),
-                (2, Some("genesis_hash_2"), None),
+                (3, Some(genesis_hash_1.clone()), None),
+                (2, Some(genesis_hash_2.clone()), None),
             ],
-            &[(3, Some("genesis_hash_1")), (3, Some("genesis_hash_2"))],
+            &[(3, Some(genesis_hash_1.clone())), (3, Some(genesis_hash_2.clone()))],
             Err(TxValidationError::InconsistentInputAndOutputValue {
                 input_value: AssetValues::new(
                     TokenAmount(0),
-                    BTreeMap::from([("genesis_hash_1".to_string(), 3), ("genesis_hash_2".to_string(), 2)])),
+                    BTreeMap::from([(genesis_hash_1.clone().to_string(), 3), (genesis_hash_2.clone().to_string(), 2)])),
                 output_value: AssetValues::new(
                     TokenAmount(0),
-                    BTreeMap::from([("genesis_hash_1".to_string(), 3), ("genesis_hash_2".to_string(), 3)])),
+                    BTreeMap::from([(genesis_hash_1.clone().to_string(), 3), (genesis_hash_2.clone().to_string(), 3)])),
             }),
         );
     }
@@ -3184,22 +3188,26 @@ mod tests {
     /// 2. Outputs contain `TxOut`s for `Item`s of amount `3` and `2`
     /// 3. `TxIn` DRS does not match `TxOut` DRS for `Item`s; Amount of `Item`s spent matches     
     fn test_tx_drs_items_only_failure_drs_mismatch() {
+        let genesis_hash_1 = TxHash::placeholder_indexed(1);
+        let genesis_hash_2 = TxHash::placeholder_indexed(2);
+        let invalid_genesis_hash = TxHash::placeholder_indexed(1337);
+
         test_tx_drs_common(
             &[
-                (3, Some("genesis_hash_1"), None),
-                (2, Some("genesis_hash_2"), None),
+                (3, Some(genesis_hash_1.clone()), None),
+                (2, Some(genesis_hash_2.clone()), None),
             ],
             &[
-                (3, Some("genesis_hash_1")),
-                (2, Some("invalid_genesis_hash")),
+                (3, Some(genesis_hash_1.clone())),
+                (2, Some(invalid_genesis_hash.clone())),
             ],
             Err(TxValidationError::InconsistentInputAndOutputValue {
                 input_value: AssetValues::new(
                     TokenAmount(0),
-                    BTreeMap::from([("genesis_hash_1".to_string(), 3), ("genesis_hash_2".to_string(), 2)])),
+                    BTreeMap::from([(genesis_hash_1.clone().to_string(), 3), (genesis_hash_2.clone().to_string(), 2)])),
                 output_value: AssetValues::new(
                     TokenAmount(0),
-                    BTreeMap::from([("genesis_hash_1".to_string(), 3), ("invalid_genesis_hash".to_string(), 2)])),
+                    BTreeMap::from([(genesis_hash_1.clone().to_string(), 3), (invalid_genesis_hash.clone().to_string(), 2)])),
             }),
         );
     }
@@ -3214,9 +3222,11 @@ mod tests {
     /// 2. Outputs contain `TxOut`s for `Item`s of amount `3` and `Token`s of amount `2`
     /// 3. `TxIn` DRS matches `TxOut` DRS for `Item`s; Amount of `Item`s and `Token`s spent matches      
     fn test_tx_drs_items_and_tokens_success() {
+        let genesis_hash = TxHash::placeholder();
+
         test_tx_drs_common(
-            &[(3, Some("genesis_hash"), None), (2, None, None)],
-            &[(3, Some("genesis_hash")), (2, None)],
+            &[(3, Some(genesis_hash.clone()), None), (2, None, None)],
+            &[(3, Some(genesis_hash.clone())), (2, None)],
             Ok(()),
         );
     }
@@ -3231,16 +3241,18 @@ mod tests {
     /// 2. Outputs contain `TxOut`s for `Item`s of amount `2` and `Token`s of amount `2`
     /// 3. `TxIn` DRS matches `TxOut` DRS for `Item`s; Amount of `Item`s spent does not match      
     fn test_tx_drs_items_and_tokens_failure_amount_mismatch() {
+        let genesis_hash = TxHash::placeholder();
+
         test_tx_drs_common(
-            &[(3, Some("genesis_hash"), None), (2, None, None)],
-            &[(2, Some("genesis_hash")), (2, None)],
+            &[(3, Some(genesis_hash.clone()), None), (2, None, None)],
+            &[(2, Some(genesis_hash.clone())), (2, None)],
             Err(TxValidationError::InconsistentInputAndOutputValue {
                 input_value: AssetValues::new(
                     TokenAmount(2),
-                    BTreeMap::from([("genesis_hash".to_string(), 3)])),
+                    BTreeMap::from([(genesis_hash.clone().to_string(), 3)])),
                 output_value: AssetValues::new(
                     TokenAmount(2),
-                    BTreeMap::from([("genesis_hash".to_string(), 2)])),
+                    BTreeMap::from([(genesis_hash.clone().to_string(), 2)])),
             }),
         );
     }
@@ -3261,19 +3273,22 @@ mod tests {
                 .to_string(),
         );
 
+        let genesis_hash = TxHash::placeholder_indexed(0);
+        let invalid_genesis_hash = TxHash::placeholder_indexed(1337);
+
         test_tx_drs_common(
             &[
-                (3, Some("genesis_hash"), test_metadata.clone()),
+                (3, Some(genesis_hash.clone()), test_metadata.clone()),
                 (2, None, test_metadata),
             ],
-            &[(1, Some("invalid_genesis_hash")), (1, None)],
+            &[(1, Some(invalid_genesis_hash.clone())), (1, None)],
             Err(TxValidationError::InconsistentInputAndOutputValue {
                 input_value: AssetValues::new(
                     TokenAmount(2),
-                    BTreeMap::from([("genesis_hash".to_string(), 3)])),
+                    BTreeMap::from([(genesis_hash.clone().to_string(), 3)])),
                 output_value: AssetValues::new(
                     TokenAmount(1),
-                    BTreeMap::from([("invalid_genesis_hash".to_string(), 1)])),
+                    BTreeMap::from([(invalid_genesis_hash.clone().to_string(), 1)])),
             }),
         );
     }
@@ -3281,8 +3296,8 @@ mod tests {
     /// Test transaction validation with multiple different DRS
     /// configurations for `TxIn` and `TxOut` values
     fn test_tx_drs_common(
-        inputs: &[(u64, Option<&str>, Option<String>)],
-        outputs: &[(u64, Option<&str>)],
+        inputs: &[(u64, Option<TxHash>, Option<String>)],
+        outputs: &[(u64, Option<TxHash>)],
         expected_result: Result<(), TxValidationError>,
     ) {
         ///

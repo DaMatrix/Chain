@@ -7,6 +7,7 @@ use crate::primitives::{
 use crate::script::lang::Script;
 use crate::utils::transaction_utils::{construct_address, construct_tx_in_out_signable_hash};
 use std::collections::BTreeMap;
+use std::str::FromStr;
 use crate::primitives::address::P2PKHAddress;
 use crate::primitives::transaction::{P2PKHTxIn, TxHash};
 use crate::utils::Placeholder;
@@ -29,8 +30,8 @@ use crate::utils::Placeholder;
 /// When a `None` value is presented alongside an input amount, the asset is assumed
 /// to be of type `Token`.
 pub fn generate_tx_with_ins_and_outs_assets(
-    input_assets: &[(u64, Option<&str>, Option<String>)], /* Input amount, genesis_hash, metadata */
-    output_assets: &[(u64, Option<&str>)],                /* Input amount, genesis_hash */
+    input_assets: &[(u64, Option<TxHash>, Option<String>)], /* Input amount, genesis_hash, metadata */
+    output_assets: &[(u64, Option<TxHash>)],                /* Input amount, genesis_hash */
 ) -> (BTreeMap<OutPoint, TxOut>, Transaction) {
     let (pk, sk) = sign::gen_keypair().unwrap();
     let spk = P2PKHAddress::from_pubkey(&pk).wrap();
@@ -41,7 +42,7 @@ pub fn generate_tx_with_ins_and_outs_assets(
     for (output_amount, genesis_hash) in output_assets {
         let tx_out = match genesis_hash {
             Some(drs) => {
-                let item = Asset::item(*output_amount, Some(drs.to_string()), None);
+                let item = Asset::item(*output_amount, Some(drs.clone()), None);
                 TxOut::new_asset(spk.clone(), item, None)
             }
             None => TxOut::new_token_amount(spk.clone(), TokenAmount(*output_amount), None),
@@ -55,7 +56,7 @@ pub fn generate_tx_with_ins_and_outs_assets(
             TxHash::placeholder(), tx.inputs.len() as u32);
         let tx_in_previous_out = match genesis_hash {
             Some(drs) => {
-                let item = Asset::item(*input_amount, Some(drs.to_string()), md.clone());
+                let item = Asset::item(*input_amount, Some(drs.clone()), md.clone());
                 TxOut::new_asset(spk.clone(), item, None)
             }
             None => TxOut::new_token_amount(spk.clone(), TokenAmount(*input_amount), None),

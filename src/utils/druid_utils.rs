@@ -152,6 +152,8 @@ mod tests {
         let sender_address_excess = P2PKHAddress::placeholder_indexed(2).wrap();
         let mut key_material = BTreeMap::new();
 
+        let genesis_hash = TxHash::placeholder_indexed(0);
+
         // Act
         //
         let send_tx = {
@@ -166,7 +168,7 @@ mod tests {
             let expectation = DruidExpectation {
                 from: from_addr.clone(),
                 to: alice_addr.to_string(),
-                asset: Asset::item(1, Some("genesis_hash".to_owned()), None),
+                asset: Asset::item(1, Some(genesis_hash.clone()), None),
             };
 
             let druid_info = DdeValues {
@@ -206,7 +208,7 @@ mod tests {
                 druid: druid.clone(),
                 participants: 2,
                 expectations: vec![expectation.clone()],
-                genesis_hash: Some("genesis_hash".to_owned()),
+                genesis_hash: Some(genesis_hash.to_string()),
             };
 
             // create the sender that match the receiver.
@@ -305,7 +307,8 @@ mod tests {
     /// Checks that item-based payments with non-matching DRS expectations fail
     fn should_fail_rb_payment_drs_expect_mismatch() {
         let (send_tx, mut recv_tx) = create_rb_payment_txs();
-        recv_tx.outputs[0].value = Asset::item(1, Some("invalid_genesis_hash".to_string()), None);
+        let invalid_genesis_hash = TxHash::placeholder_indexed(1337);
+        recv_tx.outputs[0].value = Asset::item(1, Some(invalid_genesis_hash), None);
 
         // Non-matching address expectation
         assert!(!druid_expectations_are_met(

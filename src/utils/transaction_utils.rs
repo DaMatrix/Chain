@@ -371,7 +371,8 @@ pub fn construct_item_create_tx(
     fee: Option<ReceiverInfo>,
     metadata: Option<String>,
 ) -> Transaction {
-    let genesis_hash = genesis_hash_spec.get_genesis_hash();
+    let genesis_hash = genesis_hash_spec.get_genesis_hash()
+        .map(|hash| hash.parse().expect(&hash)); // TODO: jrabil: This will always fail for GenesisTxHashSpec::Default
     let asset = Asset::item(amount, genesis_hash, metadata);
     let receiver_address = P2PKHAddress::from_pubkey(&public_key).wrap();
 
@@ -578,7 +579,9 @@ pub fn construct_rb_receive_payment_tx(
     druid_info: DdeValues,
     key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>
 ) -> Transaction {
-    let out = TxOut::new_asset(sender_address, Asset::item(1, druid_info.genesis_hash, None), Some(locktime));
+    let genesis_hash = druid_info.genesis_hash.as_ref()
+        .map(|hash| hash.parse().expect(&hash));
+    let out = TxOut::new_asset(sender_address, Asset::item(1, genesis_hash, None), Some(locktime));
     tx_outs.push(out);
     construct_rb_tx_core(
         tx_ins,
@@ -849,7 +852,7 @@ mod tests {
 
         let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs();
 
-        let drs_tx_hash = "item_tx_hash".to_string();
+        let drs_tx_hash = TxHash::placeholder();
         let item_asset_valid = ItemAsset::new(1000, Some(drs_tx_hash.clone()), None);
 
         let payment_tx_valid = construct_payment_tx(
@@ -867,7 +870,7 @@ mod tests {
         );
 
         let btree = BTreeMap::from([
-            (drs_tx_hash, 1000),
+            (drs_tx_hash.to_string(), 1000),
         ]);
         let tx_ins_spent = AssetValues::new(fees, btree);
 
@@ -883,7 +886,7 @@ mod tests {
     fn test_item_onspend_metadata() {
         let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs();
 
-        let genesis_hash = "item_tx_hash".to_string();
+        let genesis_hash = TxHash::placeholder();
         let item_asset_valid = ItemAsset::new(1000, Some(genesis_hash.clone()), None);
 
         let payment_tx_valid = construct_payment_tx(
@@ -898,7 +901,7 @@ mod tests {
         );
 
         let btree = BTreeMap::from([
-            ( genesis_hash, 1000 ),
+            ( genesis_hash.to_string(), 1000 ),
         ]);
         let tx_ins_spent = AssetValues::new(TokenAmount(0), btree);
 
@@ -1036,6 +1039,8 @@ mod tests {
         let (pk, sk) = sign::gen_test_keypair(0).unwrap();
         let mut key_material = BTreeMap::new();
 
+        let genesis_hash = TxHash::placeholder_indexed(0);
+
         // Act
         //
         let send_tx = {
@@ -1048,7 +1053,7 @@ mod tests {
             let expectation = DruidExpectation {
                 from: from_addr.clone(),
                 to: alice_addr.to_string(),
-                asset: Asset::item(1, Some("genesis_hash".to_owned()), None),
+                asset: Asset::item(1, Some(genesis_hash.clone()), None),
             };
 
             let mut tx = construct_rb_payments_send_tx(
@@ -1086,7 +1091,7 @@ mod tests {
                 druid: druid.clone(),
                 participants: 2,
                 expectations: vec![expectation],
-                genesis_hash: Some("genesis_hash".to_owned()),
+                genesis_hash: Some(genesis_hash.to_string()),
             };
 
             // create the sender that match the receiver.
