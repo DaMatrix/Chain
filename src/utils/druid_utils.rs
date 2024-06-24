@@ -208,7 +208,7 @@ mod tests {
                 druid: druid.clone(),
                 participants: 2,
                 expectations: vec![expectation.clone()],
-                genesis_hash: Some(genesis_hash.to_string()),
+                genesis_hash: Some(genesis_hash.clone()),
             };
 
             // create the sender that match the receiver.

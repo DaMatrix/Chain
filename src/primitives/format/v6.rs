@@ -518,7 +518,9 @@ fn upgrade_v6_ddevalues(old: &V6DdeValues) -> Result<DdeValues, FromV6Error> {
         expectations: old.expectations.iter()
             .map(upgrade_v6_druidexpectation)
             .collect::<Result<Vec<_>, _>>()?,
-        genesis_hash: old.genesis_hash.clone(),
+        genesis_hash: old.genesis_hash.as_ref()
+                    .map(|hash| hash.parse().map_err(FromV6Error::BadItemGenesisHash))
+                    .transpose()?,
     })
 }
 
@@ -671,7 +673,7 @@ fn downgrade_v6_ddevalues(old: &DdeValues) -> Result<V6DdeValues, ToV6Error> {
         expectations: old.expectations.iter()
             .map(downgrade_v6_druidexpectation)
             .collect::<Result<Vec<_>, _>>()?,
-        genesis_hash: old.genesis_hash.clone(),
+        genesis_hash: old.genesis_hash.as_ref().map(TxHash::to_string),
     })
 }
 

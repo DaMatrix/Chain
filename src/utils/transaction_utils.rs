@@ -579,9 +579,7 @@ pub fn construct_rb_receive_payment_tx(
     druid_info: DdeValues,
     key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>
 ) -> Transaction {
-    let genesis_hash = druid_info.genesis_hash.as_ref()
-        .map(|hash| hash.parse().expect(&hash));
-    let out = TxOut::new_asset(sender_address, Asset::item(1, genesis_hash, None), Some(locktime));
+    let out = TxOut::new_asset(sender_address, Asset::item(1, druid_info.genesis_hash, None), Some(locktime));
     tx_outs.push(out);
     construct_rb_tx_core(
         tx_ins,
@@ -1091,7 +1089,7 @@ mod tests {
                 druid: druid.clone(),
                 participants: 2,
                 expectations: vec![expectation],
-                genesis_hash: Some(genesis_hash.to_string()),
+                genesis_hash: Some(genesis_hash.clone()),
             };
 
             // create the sender that match the receiver.
