@@ -96,6 +96,7 @@ macro_rules! make_trivial_enum {
         $all_variants_vis:vis $all_variants:ident
     ) => {
         impl $ename {
+            #[allow(unused)]
             $all_variants_vis const $all_variants : &'static [Self] =
                 &[ $( Self::$vname ),+ ];
         }

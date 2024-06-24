@@ -35,7 +35,7 @@ pub fn druid_expectations_are_met<'a>(
 
                 for out in &tx.outputs {
                     match &out.script_public_key {
-                        AnyAddress::P2PKH(p2pkh) =>
+                        AnyAddress::P2PKH(_) =>
                             tx_source.insert((ins.clone(), &out.script_public_key, &out.value)),
                         AnyAddress::Burn => false,
                     };

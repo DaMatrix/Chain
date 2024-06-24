@@ -4,10 +4,8 @@ use crate::primitives::{
     asset::TokenAmount,
     transaction::{OutPoint, Transaction, TxIn, TxOut},
 };
-use crate::script::lang::Script;
-use crate::utils::transaction_utils::{construct_address, construct_tx_in_out_signable_hash};
+use crate::utils::transaction_utils::{construct_tx_core, construct_tx_in_out_signable_hash};
 use std::collections::BTreeMap;
-use std::str::FromStr;
 use crate::primitives::address::P2PKHAddress;
 use crate::primitives::transaction::{P2PKHTxIn, TxHash};
 use crate::utils::Placeholder;
@@ -35,42 +33,45 @@ pub fn generate_tx_with_ins_and_outs_assets(
 ) -> (BTreeMap<OutPoint, TxOut>, Transaction) {
     let (pk, sk) = sign::gen_keypair().unwrap();
     let spk = P2PKHAddress::from_pubkey(&pk).wrap();
-    let mut tx = Transaction::new();
     let mut utxo_set: BTreeMap<OutPoint, TxOut> = BTreeMap::new();
 
     // Generate outputs
-    for (output_amount, genesis_hash) in output_assets {
-        let tx_out = match genesis_hash {
-            Some(drs) => {
-                let item = Asset::item(*output_amount, Some(drs.clone()), None);
-                TxOut::new_asset(spk.clone(), item, None)
+    let tx_outs = output_assets.iter()
+        .map(|(output_amount, genesis_hash)| {
+            match genesis_hash {
+                Some(drs) => {
+                    let item = Asset::item(*output_amount, Some(drs.clone()), None);
+                    TxOut::new_asset(spk.clone(), item, None)
+                }
+                None => TxOut::new_token_amount(spk.clone(), TokenAmount(*output_amount), None),
             }
-            None => TxOut::new_token_amount(spk.clone(), TokenAmount(*output_amount), None),
-        };
-        tx.outputs.push(tx_out);
-    }
+        })
+        .collect::<Vec<_>>();
 
     // Generate inputs
-    for (input_amount, genesis_hash, md) in input_assets {
-        let tx_previous_out = OutPoint::new_from_hash(
-            TxHash::placeholder(), tx.inputs.len() as u32);
-        let tx_in_previous_out = match genesis_hash {
-            Some(drs) => {
-                let item = Asset::item(*input_amount, Some(drs.clone()), md.clone());
-                TxOut::new_asset(spk.clone(), item, None)
-            }
-            None => TxOut::new_token_amount(spk.clone(), TokenAmount(*input_amount), None),
-        };
-        let signable_hash = construct_tx_in_out_signable_hash(&tx_previous_out, &tx.outputs);
-        let signature = sign::sign_detached(signable_hash.as_bytes(), &sk);
-        let tx_in = TxIn::P2PKH(P2PKHTxIn {
-            previous_out: tx_previous_out.clone(),
-            public_key: pk,
-            signature,
-        });
-        utxo_set.insert(tx_previous_out, tx_in_previous_out);
-        tx.inputs.push(tx_in);
-    }
+    let tx_ins = input_assets.iter()
+        .enumerate()
+        .map(|(index, (input_amount, genesis_hash, md))| {
+            let tx_previous_out = OutPoint::new_from_hash(
+                TxHash::placeholder(), index as u32);
+            let tx_in_previous_out = match genesis_hash {
+                Some(drs) => {
+                    let item = Asset::item(*input_amount, Some(drs.clone()), md.clone());
+                    TxOut::new_asset(spk.clone(), item, None)
+                }
+                None => TxOut::new_token_amount(spk.clone(), TokenAmount(*input_amount), None),
+            };
+            let signable_hash = construct_tx_in_out_signable_hash(&tx_previous_out, &tx_outs);
+            let signature = sign::sign_detached(signable_hash.as_bytes(), &sk);
+            let tx_in = TxIn::P2PKH(P2PKHTxIn {
+                previous_out: tx_previous_out.clone(),
+                public_key: pk,
+                signature,
+            });
+            utxo_set.insert(tx_previous_out, tx_in_previous_out);
+            tx_in
+        })
+        .collect();
 
-    (utxo_set, tx)
+    (utxo_set, construct_tx_core(tx_ins, tx_outs, None))
 }

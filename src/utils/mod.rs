@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::convert::TryInto;
-use std::iter::FromIterator;
 
 use crate::constants::{D_DISPLAY_PLACES, TOTAL_TOKENS};
 use crate::primitives::asset::TokenAmount;
@@ -129,7 +128,7 @@ pub trait FromName : Sized {
     fn from_name(name: &str) -> Result<Self, &str>;
 }
 
-trait ArrayFromIterator<E> : Sized {
+pub trait ArrayFromIterator<E> : Sized {
     type Error;
 
     fn array_from_iter<I: IntoIterator<Item = E>>(iter: I) -> Result<Self, Self::Error>;

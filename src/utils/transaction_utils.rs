@@ -1,13 +1,11 @@
 use crate::constants::*;
 use crate::crypto::{sha3_256, sign_ed25519};
-use crate::crypto::sign_ed25519::{self as sign, sign_detached, PublicKey, SecretKey};
+use crate::crypto::sign_ed25519::{self as sign, PublicKey, SecretKey};
 use crate::primitives::asset::Asset;
 use crate::primitives::druid::{DdeValues, DruidExpectation};
 use crate::primitives::transaction::*;
 use crate::script::lang::Script;
-use crate::script::{OpCodes, ScriptEntry, StackEntry};
 use std::collections::BTreeMap;
-use std::convert::TryInto;
 use tracing::debug;
 use crate::primitives::address::{AnyAddress, P2PKHAddress, TxInsAddress};
 use crate::primitives::format;
@@ -125,38 +123,6 @@ pub fn construct_tx_in_out_signable_hash(previous_out: &OutPoint, tx_out: &[TxOu
     );
 
     hex::encode(sha3_256::digest(signable.as_bytes()))
-}
-
-/// Constructs signable string for a StackEntry
-///
-/// ### Arguments
-///
-/// * `entry`   - StackEntry to obtain signable string for
-#[deprecated = "This should only be used for v6 scripts; it will be removed in the future"]
-fn get_stack_entry_signable_string(entry: &StackEntry) -> String {
-    match entry {
-        StackEntry::Op(op) => format!("Op:{op}"),
-        StackEntry::Signature(signature) => {
-            format!("Signature:{}", hex::encode(signature.as_ref()))
-        }
-        StackEntry::PubKey(pub_key) => format!("PubKey:{}", hex::encode(pub_key.as_ref())),
-        StackEntry::Num(num) => format!("Num:{num}"),
-        StackEntry::Bytes(bytes) => format!("Bytes:{}", hex::encode(bytes)),
-    }
-}
-
-/// Constructs signable string for Script stack
-///
-/// ### Arguments
-///
-/// * `stack`   - StackEntry vector
-#[deprecated = "This should only be used for v6 scripts; it will be removed in the future"]
-fn get_script_signable_string(stack: &[StackEntry]) -> String {
-    stack
-        .iter()
-        .map(get_stack_entry_signable_string)
-        .collect::<Vec<String>>()
-        .join("-")
 }
 
 /// Constructs signable string for TxIn
@@ -420,8 +386,6 @@ pub fn construct_burn_tx(
     fee: Option<ReceiverInfo>,
     key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>,
 ) -> Transaction {
-    todo!();
-
     let tx_out = TxOut::new_asset(AnyAddress::Burn, value, None);
     let tx_outs = vec![tx_out];
 
@@ -591,33 +555,6 @@ pub fn construct_rb_receive_payment_tx(
     )
 }
 
-/// Constructs a set of TxIns for a payment
-///
-/// ### Arguments
-///
-/// * `tx_values`   - Series of values required for TxIn construction
-#[deprecated = "This is no longer necessary"]
-pub fn construct_payment_tx_ins(tx_values: Vec<TxConstructor>) -> Vec<TxIn> {
-    todo!()
-    /*let mut tx_ins = Vec::new();
-
-    for entry in tx_values {
-        let signable_prev_out = TxIn {
-            previous_out: Some(entry.previous_out),
-            script_signature: Script::new(),
-        };
-        let previous_out = signable_prev_out.previous_out;
-        let script_signature = Script::new();
-
-        tx_ins.push(TxIn {
-            previous_out,
-            script_signature,
-        });
-    }
-
-    tx_ins*/
-}
-
 /// Constructs a dual double entry tx
 ///
 /// ### Arguments
@@ -649,11 +586,10 @@ pub fn construct_dde_tx(
 #[cfg(test)]
 mod tests {
     use once_cell::sync::Lazy;
+    use crate::crypto::sign_ed25519::Signature;
     use super::*;
-    use crate::crypto::sign_ed25519::{self as sign, Signature};
     use crate::primitives::address::P2PKHAddress;
     use crate::primitives::asset::{AssetValues, ItemAsset, TokenAmount};
-    use crate::script::{OpCodes, ScriptError};
     use crate::utils::Placeholder;
     use crate::utils::IntoArray;
     use crate::utils::script_utils::tx_outs_are_valid;
@@ -727,13 +663,13 @@ mod tests {
 
     #[test]
     fn test_construct_a_valid_burn_tx() {
-        let token_amount = TokenAmount(400000);
+        /*let token_amount = TokenAmount(400000);
         let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs();
 
         let burn_tx = construct_burn_tx(tx_ins, Asset::Token(token_amount), None, &key_material);
         let spending_tx_hash = construct_tx_hash(&burn_tx);
 
-        /*let tx_const = TxConstructor {
+        let tx_const = TxConstructor {
             previous_out: OutPoint::new_from_hash(spending_tx_hash.parse().unwrap(), 0),
             signatures: vec![],
             pub_keys: vec![],
@@ -762,7 +698,7 @@ mod tests {
             &redeeming_tx.inputs[0].script_signature,
             burn_tx.outputs[0].script_public_key.as_ref().unwrap()
         ));*/
-
+        todo!()
         // TODO: Add assertion for full tx validity
     }
 
@@ -981,7 +917,6 @@ mod tests {
     // Creates a valid DDE transaction
     fn test_construct_a_valid_dde_tx() {
         let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs();
-        let prev_out = OutPoint::new_from_hash(TxHash::placeholder(), 0);
 
         let to_address = AnyAddress::P2PKH(P2PKHAddress::placeholder());
         let data = Asset::Item(ItemAsset {
@@ -1263,7 +1198,7 @@ mod tests {
             "signable_data");
 
         let expected_signatures = (0..TX_IN_COUNT)
-            .map(|n| sign_detached(signable_data[n].as_ref(), &secret_keys[n]))
+            .map(|n| sign_ed25519::sign_detached(signable_data[n].as_ref(), &secret_keys[n]))
             .into_array::<[_; TX_IN_COUNT]>().unwrap();
         assert_eq!(
             signatures,
@@ -1275,11 +1210,9 @@ mod tests {
         //
         let tx_ins: [TxIn; TX_IN_COUNT] = (0..TX_IN_COUNT)
             .map(|n| {
-                let sig_data = signable_data[n].to_owned();
                 let sig = signatures[n];
                 let pk = pub_keys[n];
 
-                let script = Script::pay2pkh(hex::decode(&sig_data).unwrap(), sig, pk);
                 let out_p = previous_out_points[n].clone();
 
                 TxIn::P2PKH(P2PKHTxIn {

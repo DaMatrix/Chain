@@ -16,8 +16,6 @@ pub const STANDARD_ADDRESS_BYTES : usize = sha3_256::HASH_LEN;
 struct StandardAddress(FixedByteArray<STANDARD_ADDRESS_BYTES>);
 
 impl StandardAddress {
-    pub const BYTES : usize = sha3_256::HASH_LEN;
-
     /// Creates a new address out of the given SHA3-256 `Hash`.
     fn new(hash: sha3_256::Hash) -> Self {
         Self(hash.deref().into())
@@ -37,7 +35,7 @@ impl Display for StandardAddress {
 }
 
 impl FromStr for StandardAddress {
-    type Err = <FixedByteArray<STANDARD_ADDRESS_BYTES> as FromStr>::Err;
+    type Err = hex::FromHexError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         s.parse().map(Self)
@@ -54,7 +52,7 @@ make_error_type!(
 #[derive(PartialEq)]
 pub enum ParseAddressError {
     BadPrefix(address: String); "Address \"{address}\" has unknown prefix",
-    ParseFailed(cause: <StandardAddress as FromStr>::Err); "{cause}"; cause,
+    ParseFailed(cause: hex::FromHexError); "{cause}"; cause,
 });
 
 macro_rules! standard_address_type {
@@ -214,7 +212,6 @@ mod tests {
         ];
 
         let pk_hashes = pks.each_ref().map(|pk| sha3_256::digest(pk.as_ref()));
-        let pk_hash_hex_strings = pk_hashes.each_ref().map(sha3_256::Hash::to_string);
         let addresses = pks.each_ref().map(P2PKHAddress::from_pubkey);
 
         // The two addresses are generated from different public keys, so they should be distinct

@@ -1,7 +1,7 @@
 use crate::primitives::transaction::{OutPoint, TxHash};
 use crate::utils::{add_btreemap, format_for_display};
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, fmt, iter, mem::size_of, ops};
+use std::{collections::BTreeMap, fmt, iter, ops};
 use bincode::{Decode, Encode};
 
 /// A structure representing the amount of tokens in an instance

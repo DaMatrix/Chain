@@ -7,9 +7,7 @@ use crate::primitives::address::{AnyAddress, ParseAddressError};
 use crate::primitives::asset::{Asset, ItemAsset, TokenAmount};
 use crate::primitives::druid::{DdeValues, DruidExpectation};
 use crate::primitives::transaction::*;
-use crate::script::lang::{Script, ScriptBuilder};
-use crate::script::{OpCodes, ScriptError};
-use crate::utils::{script_utils, transaction_utils};
+use crate::utils::transaction_utils;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 struct V6PublicKey(
@@ -291,120 +289,6 @@ fn upgrade_v6_asset(old: &V6Asset) -> Result<Asset, FromV6Error> {
     }
 }
 
-fn upgrade_v6_script(old: &V6Script) -> Result<Script, FromV6Error> {
-    let mut builder = ScriptBuilder::new();
-    for entry in &old.stack {
-        match entry {
-            V6StackEntry::Op(op) => match op {
-                V6OpCodes::OP_0 => builder.push_int(0),
-                V6OpCodes::OP_1 => builder.push_int(1),
-                V6OpCodes::OP_2 => builder.push_int(2),
-                V6OpCodes::OP_3 => builder.push_int(3),
-                V6OpCodes::OP_4 => builder.push_int(4),
-                V6OpCodes::OP_5 => builder.push_int(5),
-                V6OpCodes::OP_6 => builder.push_int(6),
-                V6OpCodes::OP_7 => builder.push_int(7),
-                V6OpCodes::OP_8 => builder.push_int(8),
-                V6OpCodes::OP_9 => builder.push_int(9),
-                V6OpCodes::OP_10 => builder.push_int(10),
-                V6OpCodes::OP_11 => builder.push_int(11),
-                V6OpCodes::OP_12 => builder.push_int(12),
-                V6OpCodes::OP_13 => builder.push_int(13),
-                V6OpCodes::OP_14 => builder.push_int(14),
-                V6OpCodes::OP_15 => builder.push_int(15),
-                V6OpCodes::OP_16 => builder.push_int(16),
-                V6OpCodes::OP_NOP => builder.push_op(OpCodes::OP_NOP),
-                V6OpCodes::OP_IF => builder.push_op(OpCodes::OP_IF),
-                V6OpCodes::OP_NOTIF => builder.push_op(OpCodes::OP_NOTIF),
-                V6OpCodes::OP_ELSE => builder.push_op(OpCodes::OP_ELSE),
-                V6OpCodes::OP_ENDIF => builder.push_op(OpCodes::OP_ENDIF),
-                V6OpCodes::OP_VERIFY => builder.push_op(OpCodes::OP_VERIFY),
-                V6OpCodes::OP_BURN => builder.push_op(OpCodes::OP_BURN),
-                V6OpCodes::OP_TOALTSTACK => builder.push_op(OpCodes::OP_TOALTSTACK),
-                V6OpCodes::OP_FROMALTSTACK => builder.push_op(OpCodes::OP_FROMALTSTACK),
-                V6OpCodes::OP_2DROP => builder.push_op(OpCodes::OP_2DROP),
-                V6OpCodes::OP_2DUP => builder.push_op(OpCodes::OP_2DUP),
-                V6OpCodes::OP_3DUP => builder.push_op(OpCodes::OP_3DUP),
-                V6OpCodes::OP_2OVER => builder.push_op(OpCodes::OP_2OVER),
-                V6OpCodes::OP_2ROT => builder.push_op(OpCodes::OP_2ROT),
-                V6OpCodes::OP_2SWAP => builder.push_op(OpCodes::OP_2SWAP),
-                V6OpCodes::OP_IFDUP => builder.push_op(OpCodes::OP_IFDUP),
-                V6OpCodes::OP_DEPTH => builder.push_op(OpCodes::OP_DEPTH),
-                V6OpCodes::OP_DROP => builder.push_op(OpCodes::OP_DROP),
-                V6OpCodes::OP_DUP => builder.push_op(OpCodes::OP_DUP),
-                V6OpCodes::OP_NIP => builder.push_op(OpCodes::OP_NIP),
-                V6OpCodes::OP_OVER => builder.push_op(OpCodes::OP_OVER),
-                V6OpCodes::OP_PICK => builder.push_op(OpCodes::OP_PICK),
-                V6OpCodes::OP_ROLL => builder.push_op(OpCodes::OP_ROLL),
-                V6OpCodes::OP_ROT => builder.push_op(OpCodes::OP_ROT),
-                V6OpCodes::OP_SWAP => builder.push_op(OpCodes::OP_SWAP),
-                V6OpCodes::OP_TUCK => builder.push_op(OpCodes::OP_TUCK),
-                V6OpCodes::OP_CAT => builder.push_op(OpCodes::OP_CAT),
-                V6OpCodes::OP_SUBSTR => builder.push_op(OpCodes::OP_SUBSTR),
-                V6OpCodes::OP_LEFT => builder.push_op(OpCodes::OP_LEFT),
-                V6OpCodes::OP_RIGHT => builder.push_op(OpCodes::OP_RIGHT),
-                V6OpCodes::OP_SIZE => builder.push_op(OpCodes::OP_SIZE),
-                V6OpCodes::OP_INVERT => builder.push_op(OpCodes::OP_INVERT),
-                V6OpCodes::OP_AND => builder.push_op(OpCodes::OP_AND),
-                V6OpCodes::OP_OR => builder.push_op(OpCodes::OP_OR),
-                V6OpCodes::OP_XOR => builder.push_op(OpCodes::OP_XOR),
-                V6OpCodes::OP_EQUAL => builder.push_op(OpCodes::OP_EQUAL),
-                V6OpCodes::OP_EQUALVERIFY => builder.push_op(OpCodes::OP_EQUALVERIFY),
-                V6OpCodes::OP_1ADD => builder.push_op(OpCodes::OP_1ADD),
-                V6OpCodes::OP_1SUB => builder.push_op(OpCodes::OP_1SUB),
-                V6OpCodes::OP_2MUL => builder.push_op(OpCodes::OP_2MUL),
-                V6OpCodes::OP_2DIV => builder.push_op(OpCodes::OP_2DIV),
-                V6OpCodes::OP_NOT => builder.push_op(OpCodes::OP_NOT),
-                V6OpCodes::OP_0NOTEQUAL => builder.push_op(OpCodes::OP_0NOTEQUAL),
-                V6OpCodes::OP_ADD => builder.push_op(OpCodes::OP_ADD),
-                V6OpCodes::OP_SUB => builder.push_op(OpCodes::OP_SUB),
-                V6OpCodes::OP_MUL => builder.push_op(OpCodes::OP_MUL),
-                V6OpCodes::OP_DIV => builder.push_op(OpCodes::OP_DIV),
-                V6OpCodes::OP_MOD => builder.push_op(OpCodes::OP_MOD),
-                V6OpCodes::OP_LSHIFT => builder.push_op(OpCodes::OP_LSHIFT),
-                V6OpCodes::OP_RSHIFT => builder.push_op(OpCodes::OP_RSHIFT),
-                V6OpCodes::OP_BOOLAND => builder.push_op(OpCodes::OP_BOOLAND),
-                V6OpCodes::OP_BOOLOR => builder.push_op(OpCodes::OP_BOOLOR),
-                V6OpCodes::OP_NUMEQUAL => builder.push_op(OpCodes::OP_NUMEQUAL),
-                V6OpCodes::OP_NUMEQUALVERIFY => builder.push_op(OpCodes::OP_NUMEQUALVERIFY),
-                V6OpCodes::OP_NUMNOTEQUAL => builder.push_op(OpCodes::OP_NUMNOTEQUAL),
-                V6OpCodes::OP_LESSTHAN => builder.push_op(OpCodes::OP_LESSTHAN),
-                V6OpCodes::OP_GREATERTHAN => builder.push_op(OpCodes::OP_GREATERTHAN),
-                V6OpCodes::OP_LESSTHANOREQUAL => builder.push_op(OpCodes::OP_LESSTHANOREQUAL),
-                V6OpCodes::OP_GREATERTHANOREQUAL => builder.push_op(OpCodes::OP_GREATERTHANOREQUAL),
-                V6OpCodes::OP_MIN => builder.push_op(OpCodes::OP_MIN),
-                V6OpCodes::OP_MAX => builder.push_op(OpCodes::OP_MAX),
-                V6OpCodes::OP_WITHIN => builder.push_op(OpCodes::OP_WITHIN),
-                V6OpCodes::OP_SHA3 => builder.push_op(OpCodes::OP_SHA3),
-                V6OpCodes::OP_HASH256 => builder.push_op(OpCodes::OP_HASH256),
-                V6OpCodes::OP_HASH256_V0 => return Err(FromV6Error::BadOpcode("OP_HASH256_V0")),
-                V6OpCodes::OP_HASH256_TEMP => return Err(FromV6Error::BadOpcode("OP_HASH256_TEMP")),
-                V6OpCodes::OP_CHECKSIG => builder.push_op(OpCodes::OP_CHECKSIG),
-                V6OpCodes::OP_CHECKSIGVERIFY => builder.push_op(OpCodes::OP_CHECKSIGVERIFY),
-                V6OpCodes::OP_CHECKMULTISIG => builder.push_op(OpCodes::OP_CHECKMULTISIG),
-                V6OpCodes::OP_CHECKMULTISIGVERIFY => builder.push_op(OpCodes::OP_CHECKMULTISIGVERIFY),
-                V6OpCodes::OP_CREATE => builder.push_op(OpCodes::OP_CREATE),
-                V6OpCodes::OP_NOP1 => builder.push_op(OpCodes::OP_NOP1),
-                V6OpCodes::OP_NOP2 => builder.push_op(OpCodes::OP_NOP2),
-                V6OpCodes::OP_NOP3 => builder.push_op(OpCodes::OP_NOP3),
-                V6OpCodes::OP_NOP4 => builder.push_op(OpCodes::OP_NOP4),
-                V6OpCodes::OP_NOP5 => builder.push_op(OpCodes::OP_NOP5),
-                V6OpCodes::OP_NOP6 => builder.push_op(OpCodes::OP_NOP6),
-                V6OpCodes::OP_NOP7 => builder.push_op(OpCodes::OP_NOP7),
-                V6OpCodes::OP_NOP8 => builder.push_op(OpCodes::OP_NOP8),
-                V6OpCodes::OP_NOP9 => builder.push_op(OpCodes::OP_NOP9),
-                V6OpCodes::OP_NOP10 => builder.push_op(OpCodes::OP_NOP10),
-            },
-            V6StackEntry::Signature(signature) => builder.push_data(&signature.0),
-            V6StackEntry::PubKey(pubkey) => builder.push_data(&pubkey.0),
-            V6StackEntry::Num(num) => builder.push_int(*num),
-            V6StackEntry::Bytes(bytes) => builder.push_data(&hex::decode(bytes)
-                    .map_err(|err| FromV6Error::NotHexBytes(bytes.clone(), err))?),
-        }
-    }
-    Ok(builder.finish())
-}
-
 fn upgrade_v6_outpoint(old: &V6OutPoint) -> Result<OutPoint, FromV6Error> {
     Ok(OutPoint {
         t_hash: old.t_hash.parse().map_err(FromV6Error::BadTxHash)?,
@@ -572,7 +456,6 @@ make_error_type!(pub enum ToV6Error {
     BadOpcode(name: &'static str); "script contained unsupported opcode \"{name}\"",
     NotHexBytes(bytes: String, cause: hex::FromHexError);
         "script contained invalid hex bytes: \"{bytes}\": {cause}"; cause,
-    CantDecodeScript(cause: ScriptError); "failed to decode script: {cause}"; cause,
     BadScript; "script doesn't match any known v6 patterns",
 
     BadAddress(address: AnyAddress);
@@ -799,14 +682,13 @@ mod tests {
     use super::*;
 
     use std::collections::BTreeMap;
-    use std::str::from_utf8;
     use once_cell::sync::Lazy;
     use crate::constants::STANDARD_ADDRESS_LENGTH_BYTES;
     use crate::crypto::sign_ed25519;
     use crate::crypto::sign_ed25519::{PublicKey, SecretKey};
     use crate::primitives::address::P2PKHAddress;
     use crate::primitives::asset::{Asset, AssetValues, ItemAsset, TokenAmount};
-    use crate::primitives::transaction::{OutPoint, Transaction, TxConstructor, TxIn};
+    use crate::primitives::transaction::{OutPoint, Transaction};
     use crate::utils::{Placeholder, script_utils, transaction_utils};
     use crate::utils::transaction_utils::ReceiverInfo;
 
