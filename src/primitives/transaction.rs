@@ -476,25 +476,7 @@ pub struct Transaction {
     pub druid_info: Option<DdeValues>,
 }
 
-impl Default for Transaction {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Transaction {
-    /// Creates a new Transaction instance
-    #[deprecated = "Transactions should not be used in a mutable fashion"]
-    pub fn new() -> Transaction {
-        Transaction {
-            version: TxVersion::V6,
-            inputs: Vec::new(),
-            outputs: Vec::new(),
-            fees: Vec::new(),
-            druid_info: None,
-        }
-    }
-
     /// Gets the create asset assigned to this transaction, if it exists
     fn get_create_asset(&self) -> Option<&Asset> {
         let is_create = self.inputs.len() == 1

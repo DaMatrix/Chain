@@ -12,9 +12,9 @@ use crate::crypto::sign_ed25519::{
 };
 use crate::script::interface_ops::*;
 use crate::script::{OpCodes, ScriptEntry, ScriptError, StackEntry};
-use crate::utils::transaction_utils::construct_address;
 use serde::{Deserialize, Serialize};
 use tracing::{error, trace, warn};
+use crate::primitives::address::P2PKHAddress;
 use crate::utils::serialize_utils::{bincode_borrow_decode_from_slice_standard, bincode_decode_from_slice_standard, bincode_encode_to_write_standard};
 use crate::utils::ToName;
 
@@ -566,7 +566,7 @@ impl Script {
         builder.push_data(pub_key.as_ref());
         builder.push_op(OpCodes::OP_DUP);
         builder.push_op(OpCodes::OP_HASH256);
-        builder.push_data(&hex::decode(construct_address(&pub_key)).expect("address contains non-hex characters?"));
+        builder.push_data(P2PKHAddress::from_pubkey(&pub_key).get_hash().as_ref());
         builder.push_op(OpCodes::OP_EQUALVERIFY);
         builder.push_op(OpCodes::OP_CHECKSIG);
         builder.finish()

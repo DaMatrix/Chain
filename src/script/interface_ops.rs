@@ -7,7 +7,6 @@ use crate::primitives::asset::{Asset, TokenAmount};
 use crate::primitives::transaction::*;
 use crate::script::lang::{ConditionStack, Script, Stack};
 use crate::script::{OpCodes, ScriptError, StackEntry};
-use crate::utils::transaction_utils::construct_address;
 use std::collections::BTreeMap;
 use tracing::{debug, error, info, trace};
 use tracing_subscriber::field::debug;
@@ -1029,8 +1028,8 @@ pub fn op_sha3(stack: &mut Stack) -> Result<(), ScriptError> {
 /// * `stack`  - mutable reference to the stack
 pub fn op_hash256(stack: &mut Stack) -> Result<(), ScriptError> {
     let pk = pop_pubkey(stack)?;
-    let addr = construct_address(&pk);
-    stack.push(StackEntry::Bytes(hex::decode(addr).unwrap()))
+    let addr = *sha3_256::digest(pk.as_ref());
+    stack.push(StackEntry::Bytes(addr.to_vec()))
 }
 
 /// OP_CHECKSIG: Pushes ONE onto the stack if the signature is valid, ZERO otherwise

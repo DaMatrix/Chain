@@ -62,6 +62,13 @@ macro_rules! standard_address_type {
         #[serde(transparent)]
         pub struct $name { standard_address: StandardAddress }
 
+        impl $name {
+            #[doc = "Gets the SHA3-256 hash which this address wraps"]
+            pub fn get_hash(&self) -> sha3_256::Hash {
+                sha3_256::Hash::from_slice(self.standard_address.as_ref()).unwrap()
+            }
+        }
+
         $( impl $name {
             #[doc = "Wraps this address into an `AnyAddress`"]
             pub fn wrap(self) -> AnyAddress {

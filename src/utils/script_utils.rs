@@ -11,7 +11,7 @@ use crate::script::interface_ops::*;
 use crate::script::lang::{ConditionStack, Script, Stack};
 use crate::script::{OpCodes, ScriptEntry, ScriptError, StackEntry};
 use crate::utils::transaction_utils::{
-    construct_address, construct_tx_hash, construct_tx_in_out_signable_hash,
+    construct_tx_hash, construct_tx_in_out_signable_hash,
     construct_tx_in_signable_asset_hash, construct_tx_in_signable_hash,
 };
 use ring::error;
@@ -346,16 +346,6 @@ fn item_has_valid_size(item: &ItemAsset) -> bool {
         return metadata.len() <= MAX_METADATA_BYTES;
     }
     true
-}
-
-/// Checks that an address has a valid length
-///
-/// ### Arguments
-///
-/// * `address` - Address to check
-#[deprecated = "Use AnyAddress::from_str(address).is_ok()"]
-fn address_has_valid_length(address: &str) -> bool {
-    address.len() == 32 || address.len() == 64
 }
 
 #[cfg(test)]
@@ -1992,7 +1982,7 @@ mod tests {
         let (pk, sk) = sign::gen_keypair().unwrap();
         let mut stack = Stack::new();
         stack.push(StackEntry::PubKey(pk));
-        let mut v: Vec<StackEntry> = vec![StackEntry::Bytes(hex::decode(construct_address(&pk)).unwrap())];
+        let mut v: Vec<StackEntry> = vec![StackEntry::Bytes(P2PKHAddress::from_pubkey(&pk).get_hash().to_vec())];
         op_hash256(&mut stack);
         assert_eq!(stack.main_stack, v);
         /// op_hash256([]) -> fail
@@ -2822,17 +2812,6 @@ mod tests {
     }
 
     #[test]
-    /// Checks whether addresses are validated correctly
-    fn test_validate_addresses_correctly() {
-        let (pk, _) = sign::gen_test_keypair(0).unwrap();
-        let address = construct_address(&pk);
-
-        assert!(address_has_valid_length(&address));
-        assert!(address_has_valid_length(&hex::encode([0; 32])));
-        assert!(!address_has_valid_length(&hex::encode([0; 64])));
-    }
-
-    #[test]
     /// Checks that correct member multisig scripts are validated as such
     fn test_pass_member_multisig_valid() {
         let (pk, sk) = sign::gen_test_keypair(0).unwrap();
@@ -3098,9 +3077,11 @@ mod tests {
             let tx_ins = vec![tx_in.clone()];
 
             let tx = Transaction {
+                version: TxVersion::LATEST,
                 inputs: tx_ins,
                 outputs: ongoing_tx_outs.clone(),
-                ..Default::default()
+                fees: vec![],
+                druid_info: None,
             };
 
             tx_is_valid_full(&tx, 500000000, |v| {

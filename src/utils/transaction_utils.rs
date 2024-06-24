@@ -417,10 +417,11 @@ pub fn construct_tx_core(
     };
 
     Transaction {
+        version: TxVersion::V6,
         inputs: tx_ins,
         outputs: tx_outs,
         fees: fee_tx_out,
-        ..Default::default()
+        druid_info: None,
     }
 }
 
@@ -592,7 +593,7 @@ mod tests {
     use crate::primitives::asset::{AssetValues, ItemAsset, TokenAmount};
     use crate::utils::Placeholder;
     use crate::utils::IntoArray;
-    use crate::utils::script_utils::tx_outs_are_valid;
+    use crate::utils::script_utils::tx_outs_are_valid_full;
 
     fn test_construct_valid_inputs() -> (Vec<TxInConstructor<'static>>, String, BTreeMap<OutPoint, (PublicKey, SecretKey)>) {
         static KEYPAIR: Lazy<(PublicKey, SecretKey)> = Lazy::new(|| sign::gen_test_keypair(0).unwrap());
@@ -772,11 +773,11 @@ mod tests {
 
         let tx_ins_spent = AssetValues::new(tokens + fees, BTreeMap::new());
 
-        assert!(tx_outs_are_valid(
+        assert_eq!(tx_outs_are_valid_full(
             &payment_tx_valid.outputs,
             &payment_tx_valid.fees,
             tx_ins_spent
-        ));
+        ), Ok(()));
     }
 
     #[test]
@@ -808,11 +809,11 @@ mod tests {
         ]);
         let tx_ins_spent = AssetValues::new(fees, btree);
 
-        assert!(tx_outs_are_valid(
+        assert_eq!(tx_outs_are_valid_full(
             &payment_tx_valid.outputs,
             &payment_tx_valid.fees,
             tx_ins_spent
-        ));
+        ), Ok(()));
     }
 
     #[test]
@@ -839,11 +840,11 @@ mod tests {
         ]);
         let tx_ins_spent = AssetValues::new(TokenAmount(0), btree);
 
-        assert!(tx_outs_are_valid(
+        assert_eq!(tx_outs_are_valid_full(
             &payment_tx_valid.outputs,
             &[],
             tx_ins_spent
-        ));
+        ), Ok(()));
     }
 
     #[test]
@@ -1069,7 +1070,7 @@ mod tests {
         //
         let actual_pub_addresses: Vec<String> = pub_keys
             .iter()
-            .map(construct_address)
+            .map(|pk| P2PKHAddress::from_pubkey(pk).to_string())
             .collect();
 
         //
