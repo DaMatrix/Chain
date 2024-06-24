@@ -2868,8 +2868,7 @@ mod tests {
         }];
         let tx_ins = update_input_signatures(
             &tx_const,
-            &tx_outs,
-            &key_material);
+            &tx_outs);
 
         let hash_to_sign = construct_tx_in_out_signable_hash(
             &outpoint, &tx_outs);
@@ -2903,8 +2902,7 @@ mod tests {
         }];
         let tx_ins = update_input_signatures(
             &tx_const,
-            &tx_outs,
-            &key_material);
+            &tx_outs);
 
         let hash_to_sign = construct_tx_in_out_signable_hash(
             &outpoint, &tx_outs);
@@ -2943,8 +2941,7 @@ mod tests {
         }];
         let tx_ins = update_input_signatures(
             &tx_const,
-            &tx_outs,
-            &key_material);
+            &tx_outs);
 
         let hash_to_sign = construct_tx_in_out_signable_hash(
             &outpoint, &tx_outs);

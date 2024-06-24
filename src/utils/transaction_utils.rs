@@ -364,12 +364,11 @@ pub fn construct_payment_tx(
     tx_ins: Vec<TxInConstructor>,
     receiver: ReceiverInfo,
     fee: Option<ReceiverInfo>,
-    locktime: u64,
-    key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>
+    locktime: u64
 ) -> Transaction {
     let tx_out = TxOut::new_asset(receiver.address, receiver.asset, Some(locktime));
     let tx_outs = vec![tx_out];
-    let final_tx_ins = update_input_signatures(&tx_ins, &tx_outs, key_material);
+    let final_tx_ins = update_input_signatures(&tx_ins, &tx_outs);
 
     construct_tx_core(final_tx_ins, tx_outs, fee)
 }
@@ -384,12 +383,11 @@ pub fn construct_burn_tx(
     tx_ins: Vec<TxInConstructor>,
     value: Asset,
     fee: Option<ReceiverInfo>,
-    key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>,
 ) -> Transaction {
     let tx_out = TxOut::new_asset(AnyAddress::Burn, value, None);
     let tx_outs = vec![tx_out];
 
-    let final_tx_ins = update_input_signatures(&tx_ins, &tx_outs, key_material);
+    let final_tx_ins = update_input_signatures(&tx_ins, &tx_outs);
 
     construct_tx_core(final_tx_ins, tx_outs, fee)
 }
@@ -440,10 +438,9 @@ pub fn construct_rb_tx_core(
     tx_outs: Vec<TxOut>,
     fee: Option<ReceiverInfo>,
     druid: String,
-    druid_expectation: Vec<DruidExpectation>,
-    key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>
+    druid_expectation: Vec<DruidExpectation>
 ) -> Transaction {
-    let tx_ins = update_input_signatures(&tx_ins, &tx_outs, key_material);
+    let tx_ins = update_input_signatures(&tx_ins, &tx_outs);
 
     let mut tx = construct_tx_core(tx_ins, tx_outs, fee);
 
@@ -464,7 +461,7 @@ pub fn construct_rb_tx_core(
 /// * `tx_ins`          - Inputs to the transaction
 /// * `tx_outs`         - Outputs of the transaction
 // TODO: rename this to something less confusing
-pub fn update_input_signatures(tx_ins: &[TxInConstructor], tx_outs: &[TxOut], key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>) -> Vec<TxIn> {
+pub fn update_input_signatures(tx_ins: &[TxInConstructor], tx_outs: &[TxOut]) -> Vec<TxIn> {
     tx_ins.iter()
         .map(|ctor| match *ctor {
             TxInConstructor::Coinbase { block_number } =>
@@ -508,8 +505,7 @@ pub fn construct_rb_payments_send_tx(
     fee: Option<ReceiverInfo>,
     receiver: ReceiverInfo,
     locktime: u64,
-    druid_info: DdeValues,
-    key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>
+    druid_info: DdeValues
 ) -> Transaction {
     let out = TxOut::new_asset(receiver.address, receiver.asset, Some(locktime));
     tx_outs.push(out);
@@ -519,7 +515,6 @@ pub fn construct_rb_payments_send_tx(
         fee,
         druid_info.druid,
         druid_info.expectations,
-        key_material,
     )
 }
 
@@ -541,8 +536,7 @@ pub fn construct_rb_receive_payment_tx(
     fee: Option<ReceiverInfo>,
     sender_address: AnyAddress,
     locktime: u64,
-    druid_info: DdeValues,
-    key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>
+    druid_info: DdeValues
 ) -> Transaction {
     let out = TxOut::new_asset(sender_address, Asset::item(1, druid_info.genesis_hash, None), Some(locktime));
     tx_outs.push(out);
@@ -552,7 +546,6 @@ pub fn construct_rb_receive_payment_tx(
         fee,
         druid_info.druid,
         druid_info.expectations,
-        key_material,
     )
 }
 
@@ -570,10 +563,9 @@ pub fn construct_dde_tx(
     druid_info: DdeValues,
     tx_ins: Vec<TxInConstructor>,
     tx_outs: Vec<TxOut>,
-    fee: Option<ReceiverInfo>,
-    key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>
+    fee: Option<ReceiverInfo>
 ) -> Transaction {
-    let tx_ins = update_input_signatures(&tx_ins, &tx_outs, key_material);
+    let tx_ins = update_input_signatures(&tx_ins, &tx_outs);
 
     let mut tx = construct_tx_core(tx_ins, tx_outs, fee);
 
@@ -595,7 +587,7 @@ mod tests {
     use crate::utils::IntoArray;
     use crate::utils::script_utils::tx_outs_are_valid_full;
 
-    fn test_construct_valid_inputs() -> (Vec<TxInConstructor<'static>>, String, BTreeMap<OutPoint, (PublicKey, SecretKey)>) {
+    fn test_construct_valid_inputs() -> (Vec<TxInConstructor<'static>>, String) {
         static KEYPAIR: Lazy<(PublicKey, SecretKey)> = Lazy::new(|| sign::gen_test_keypair(0).unwrap());
         static PREV_OUT : Lazy<OutPoint> = Lazy::new(|| OutPoint::new_from_hash(TxHash::placeholder(), 0));
 
@@ -603,17 +595,13 @@ mod tests {
         let prev_out = &*PREV_OUT;
         let drs_block_hash = hex::encode(&[1, 2, 3, 4, 5, 6]);
 
-        let key_material = BTreeMap::from([
-            ( prev_out.clone(), (pk.clone(), sk.clone()) ),
-        ]);
-
         let tx_ins = vec![TxInConstructor::P2PKH {
             previous_out: prev_out,
             public_key: pk,
             secret_key: sk,
         }];
 
-        (tx_ins, drs_block_hash, key_material)
+        (tx_ins, drs_block_hash)
     }
 
     #[test]
@@ -621,7 +609,7 @@ mod tests {
         todo!();
 
         /*let token_amount = TokenAmount(400000);
-        let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs();
+        let (tx_ins, _drs_block_hash) = test_construct_valid_inputs();
         let script = Script::build(&[
             ScriptEntry::Int(10),
             ScriptEntry::Op(OpCodes::OP_DROP),
@@ -665,7 +653,7 @@ mod tests {
     #[test]
     fn test_construct_a_valid_burn_tx() {
         /*let token_amount = TokenAmount(400000);
-        let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs();
+        let (tx_ins, _drs_block_hash) = test_construct_valid_inputs();
 
         let burn_tx = construct_burn_tx(tx_ins, Asset::Token(token_amount), None, &key_material);
         let spending_tx_hash = construct_tx_hash(&burn_tx);
@@ -705,7 +693,7 @@ mod tests {
 
     #[test]
     fn test_construct_a_valid_payment_tx() {
-        let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs();
+        let (tx_ins, _drs_block_hash) = test_construct_valid_inputs();
 
         let token_amount = TokenAmount(400000);
         let payment_tx = construct_payment_tx(
@@ -715,8 +703,7 @@ mod tests {
                 asset: Asset::Token(token_amount),
             },
             None,
-            0,
-            &key_material
+            0
         );
         assert_eq!(Asset::Token(token_amount), payment_tx.outputs[0].value);
         assert_eq!(
@@ -728,7 +715,7 @@ mod tests {
     #[test]
     /// Creates a valid payment transaction including fees
     fn test_construct_valid_payment_tx_with_fees() {
-        let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs();
+        let (tx_ins, _drs_block_hash) = test_construct_valid_inputs();
 
         let token_amount = TokenAmount(400000);
         let fee_amount = TokenAmount(1000);
@@ -742,8 +729,7 @@ mod tests {
                 address: hex::encode(&[0u8; 32]).parse().unwrap(),
                 asset: Asset::Token(fee_amount),
             }),
-            0,
-            &key_material
+            0
         );
         assert_eq!(Asset::Token(token_amount), payment_tx.outputs[0].value);
         assert_eq!(Asset::Token(fee_amount), payment_tx.fees[0].value);
@@ -755,7 +741,7 @@ mod tests {
         let tokens = TokenAmount(400000);
         let fees = TokenAmount(1000);
 
-        let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs();
+        let (tx_ins, _drs_block_hash) = test_construct_valid_inputs();
 
         let payment_tx_valid = construct_payment_tx(
             tx_ins,
@@ -767,8 +753,7 @@ mod tests {
                 address: hex::encode(&[0u8; 32]).parse().unwrap(),
                 asset: Asset::Token(fees),
             }),
-            0,
-            &key_material
+            0
         );
 
         let tx_ins_spent = AssetValues::new(tokens + fees, BTreeMap::new());
@@ -785,7 +770,7 @@ mod tests {
     fn test_item_onspend_with_fees() {
         let fees = TokenAmount(1000);
 
-        let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs();
+        let (tx_ins, _drs_block_hash) = test_construct_valid_inputs();
 
         let drs_tx_hash = TxHash::placeholder();
         let item_asset_valid = ItemAsset::new(1000, Some(drs_tx_hash.clone()), None);
@@ -800,8 +785,7 @@ mod tests {
                 address: hex::encode(&[0u8; 32]).parse().unwrap(),
                 asset: Asset::Token(fees),
             }),
-            0,
-            &key_material
+            0
         );
 
         let btree = BTreeMap::from([
@@ -819,7 +803,7 @@ mod tests {
     #[test]
     /// Checks the validity of the metadata on-spend for items
     fn test_item_onspend_metadata() {
-        let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs();
+        let (tx_ins, _drs_block_hash) = test_construct_valid_inputs();
 
         let genesis_hash = TxHash::placeholder();
         let item_asset_valid = ItemAsset::new(1000, Some(genesis_hash.clone()), None);
@@ -831,8 +815,7 @@ mod tests {
                 asset: Asset::Item(item_asset_valid),
             },
             None,
-            0,
-            &key_material
+            0
         );
 
         let btree = BTreeMap::from([
@@ -855,10 +838,6 @@ mod tests {
         let t_hash_1 = TxHash::placeholder_indexed(1);
         let prev_out = OutPoint::new_from_hash(t_hash_1, 0);
 
-        let key_material_1 = BTreeMap::from([
-            (prev_out.clone(), (pk.clone(), sk.clone())),
-        ]);
-
         let token_amount = TokenAmount(400000);
         let tx_ins_1 = vec![TxInConstructor::P2PKH {
             previous_out: &prev_out,
@@ -873,16 +852,11 @@ mod tests {
             },
             None,
             0,
-            &key_material_1,
         );
         let tx_1_hash = construct_tx_hash(&payment_tx_1);
         let tx_1_out_p = OutPoint::new_from_hash(tx_1_hash.parse().unwrap(), 0);
 
         // Second tx referencing first
-        let key_material_2 = BTreeMap::from([
-            (tx_1_out_p.clone(), (pk.clone(), sk.clone())),
-        ]);
-
         let tx_ins_2 = vec![TxInConstructor::P2PKH {
             previous_out: &tx_1_out_p,
             public_key: &pk,
@@ -896,7 +870,6 @@ mod tests {
             },
             None,
             0,
-            &key_material_2,
         );
 
         let tx_2_hash = construct_tx_hash(&payment_tx_2);
@@ -917,7 +890,7 @@ mod tests {
     #[test]
     // Creates a valid DDE transaction
     fn test_construct_a_valid_dde_tx() {
-        let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs();
+        let (tx_ins, _drs_block_hash) = test_construct_valid_inputs();
 
         let to_address = AnyAddress::P2PKH(P2PKHAddress::placeholder());
         let data = Asset::Item(ItemAsset {
@@ -928,7 +901,7 @@ mod tests {
 
         let tx_outs = vec![TxOut::new_asset(to_address, data.clone(), None)];
 
-        let signed_tx_ins = update_input_signatures(&tx_ins, &tx_outs, &key_material);
+        let signed_tx_ins = update_input_signatures(&tx_ins, &tx_outs);
         let from_addr = construct_tx_ins_address(TxVersion::V6, &signed_tx_ins, &tx_outs);
 
         // DDE params
@@ -947,7 +920,7 @@ mod tests {
             expectations: expects.clone(),
             genesis_hash: None,
         };
-        let dde = construct_dde_tx(druid_info, tx_ins, tx_outs, None, &key_material);
+        let dde = construct_dde_tx(druid_info, tx_ins, tx_outs, None);
 
         assert_eq!(dde.druid_info.clone().unwrap().druid, druid);
         assert_eq!(dde.outputs[0].clone().value, data);
@@ -1005,7 +978,6 @@ mod tests {
                     expectations: vec![expectation],
                     genesis_hash: None,
                 },
-                &key_material,
             );
 
             tx.outputs.push(excess_tx_out);
@@ -1029,7 +1001,7 @@ mod tests {
             };
 
             // create the sender that match the receiver.
-            construct_rb_receive_payment_tx(tx_ins, Vec::new(), None, alice_addr, 0, druid_info, &key_material)
+            construct_rb_receive_payment_tx(tx_ins, Vec::new(), None, alice_addr, 0, druid_info)
         };
 
         // Assert

@@ -692,7 +692,7 @@ mod tests {
     use crate::utils::{Placeholder, script_utils, transaction_utils};
     use crate::utils::transaction_utils::ReceiverInfo;
 
-    fn test_construct_valid_inputs() -> (Vec<TxInConstructor<'static>>, BTreeMap<OutPoint, (PublicKey, SecretKey)>) {
+    fn test_construct_valid_inputs() -> Vec<TxInConstructor<'static>> {
         static KEYPAIR : Lazy<(PublicKey, SecretKey)> = Lazy::new(|| sign_ed25519::gen_test_keypair(0).unwrap());
         static PREV_OUT : Lazy<OutPoint> = Lazy::new(|| {
             let t_hash = "g48dda5bbe9171a6656206ec56c595c5";
@@ -702,16 +702,11 @@ mod tests {
         let (pk, sk) = &*KEYPAIR;
         let prev_out = &*PREV_OUT;
 
-        let key_material = BTreeMap::from([
-            ( prev_out.clone(), (pk.clone(), sk.clone()) ),
-        ]);
-
-        let tx_ins = vec![TxInConstructor::P2PKH {
+        vec![TxInConstructor::P2PKH {
             previous_out: prev_out,
             public_key: pk,
             secret_key: sk,
-        }];
-        (tx_ins, key_material)
+        }]
     }
 
     fn test_tx_matches_expected(tx: &Transaction, expected_hex: &str) {
@@ -727,7 +722,7 @@ mod tests {
     #[test]
     fn test_p2pkh_tx() {
         let tokens = TokenAmount(400000);
-        let (tx_ins, key_material) = test_construct_valid_inputs();
+        let tx_ins = test_construct_valid_inputs();
 
         let payment_tx = transaction_utils::construct_payment_tx(
             tx_ins,
@@ -737,7 +732,6 @@ mod tests {
             },
             None,
             0,
-            &key_material,
         );
 
         assert_eq!(Asset::Token(tokens), payment_tx.outputs[0].value);
@@ -761,7 +755,7 @@ mod tests {
     fn test_p2pkh_tx_fees() {
         let tokens = TokenAmount(400000);
         let fees = TokenAmount(1000);
-        let (tx_ins, key_material) = test_construct_valid_inputs();
+        let tx_ins = test_construct_valid_inputs();
 
         let payment_tx = transaction_utils::construct_payment_tx(
             tx_ins,
@@ -774,7 +768,6 @@ mod tests {
                 asset: Asset::Token(fees),
             }),
             0,
-            &key_material,
         );
 
         assert_eq!(Asset::Token(tokens), payment_tx.outputs[0].value);
@@ -793,7 +786,7 @@ mod tests {
 
     #[test]
     fn test_item_onspend() {
-        let (tx_ins, key_material) = test_construct_valid_inputs();
+        let tx_ins = test_construct_valid_inputs();
 
         let drs_tx_hash : TxHash = "gb875632ccf606eef2397124e6c2febf".parse().unwrap();
         let item_asset_valid = ItemAsset::new(1000, Some(drs_tx_hash.clone()), None);
@@ -806,7 +799,6 @@ mod tests {
             },
             None,
             0,
-            &key_material,
         );
 
         let tx_ins_spent = AssetValues::new(
@@ -825,7 +817,7 @@ mod tests {
     #[test]
     fn test_item_onspend_with_fees() {
         let fees = TokenAmount(1000);
-        let (tx_ins, key_material) = test_construct_valid_inputs();
+        let tx_ins = test_construct_valid_inputs();
 
         let drs_tx_hash : TxHash = "gb875632ccf606eef2397124e6c2febf".parse().unwrap();
         let item_asset_valid = ItemAsset::new(1000, Some(drs_tx_hash.clone()), None);
@@ -841,7 +833,6 @@ mod tests {
                 asset: Asset::Token(fees),
             }),
             0,
-            &key_material,
         );
 
         let tx_ins_spent = AssetValues::new(
@@ -881,7 +872,6 @@ mod tests {
             },
             None,
             0,
-            &key_material,
         );
         let tx_1_hash = transaction_utils::construct_tx_hash(&payment_tx_1);
         let tx_1_out_p = OutPoint::new_from_hash(tx_1_hash.parse().unwrap(), 0);
@@ -903,8 +893,7 @@ mod tests {
                 asset: Asset::Token(token_amount),
             },
             None,
-            0,
-            &key_material);
+            0);
 
         let tx_2_hash = transaction_utils::construct_tx_hash(&payment_tx_2);
         let tx_2_out_p = OutPoint::new_from_hash(tx_2_hash.parse().unwrap(), 0);
