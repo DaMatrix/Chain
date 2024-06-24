@@ -7,6 +7,7 @@ use crate::primitives::{
 use crate::script::lang::Script;
 use crate::utils::transaction_utils::{construct_address, construct_tx_in_out_signable_hash};
 use std::collections::BTreeMap;
+use crate::primitives::address::P2PKHAddress;
 use crate::primitives::transaction::{P2PKHTxIn, TxHash};
 use crate::utils::Placeholder;
 
@@ -32,7 +33,7 @@ pub fn generate_tx_with_ins_and_outs_assets(
     output_assets: &[(u64, Option<&str>)],                /* Input amount, genesis_hash */
 ) -> (BTreeMap<OutPoint, TxOut>, Transaction) {
     let (pk, sk) = sign::gen_keypair().unwrap();
-    let spk = construct_address(&pk);
+    let spk = P2PKHAddress::from_pubkey(&pk).wrap();
     let mut tx = Transaction::new();
     let mut utxo_set: BTreeMap<OutPoint, TxOut> = BTreeMap::new();
 

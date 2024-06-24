@@ -9,11 +9,11 @@ use crate::script::{OpCodes, ScriptEntry, StackEntry};
 use std::collections::BTreeMap;
 use std::convert::TryInto;
 use tracing::debug;
-use crate::primitives::address::AnyAddress;
+use crate::primitives::address::{AnyAddress, P2PKHAddress};
 use crate::primitives::format;
 
 pub struct ReceiverInfo {
-    pub address: String,
+    pub address: AnyAddress,
     pub asset: Asset,
 }
 
@@ -373,7 +373,7 @@ pub fn construct_item_create_tx(
 ) -> Transaction {
     let genesis_hash = genesis_hash_spec.get_genesis_hash();
     let asset = Asset::item(amount, genesis_hash, metadata);
-    let receiver_address = construct_address(&public_key);
+    let receiver_address = P2PKHAddress::from_pubkey(&public_key).wrap();
 
     let tx_ins = construct_create_tx_in(block_num, &asset, public_key, secret_key);
     let tx_out = TxOut::new_asset(receiver_address, asset, None);
@@ -421,7 +421,7 @@ pub fn construct_burn_tx(
 ) -> Transaction {
     todo!();
 
-    let tx_out = TxOut::new_asset_v2(AnyAddress::Burn, value, None);
+    let tx_out = TxOut::new_asset(AnyAddress::Burn, value, None);
     let tx_outs = vec![tx_out];
 
     let final_tx_ins = update_input_signatures(&tx_ins, &tx_outs, key_material);
@@ -573,7 +573,7 @@ pub fn construct_rb_receive_payment_tx(
     tx_ins: Vec<TxInConstructor>,
     mut tx_outs: Vec<TxOut>,
     fee: Option<ReceiverInfo>,
-    sender_address: String,
+    sender_address: AnyAddress,
     locktime: u64,
     druid_info: DdeValues,
     key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>
@@ -704,7 +704,7 @@ mod tests {
         let redeeming_tx = construct_payment_tx(
             redeeming_tx_ins,
             ReceiverInfo {
-                address: hex::encode(vec![0; 32]),
+                address: hex::encode(&[0u8; 32]).parse().unwrap(),
                 asset: Asset::Token(token_amount),
             },
             None,
@@ -744,7 +744,7 @@ mod tests {
         let redeeming_tx = construct_payment_tx(
             redeeming_tx_ins,
             ReceiverInfo {
-                address: hex::encode(vec![0; 32]),
+                address: hex::encode(&[0u8; 32]).parse().unwrap(),
                 asset: Asset::Token(token_amount),
             },
             None,
@@ -773,7 +773,7 @@ mod tests {
         let payment_tx = construct_payment_tx(
             tx_ins,
             ReceiverInfo {
-                address: hex::encode(vec![0; 32]),
+                address: hex::encode(&[0u8; 32]).parse().unwrap(),
                 asset: Asset::Token(token_amount),
             },
             None,
@@ -797,11 +797,11 @@ mod tests {
         let payment_tx = construct_payment_tx(
             tx_ins,
             ReceiverInfo {
-                address: hex::encode(vec![0; 32]),
+                address: hex::encode(&[0u8; 32]).parse().unwrap(),
                 asset: Asset::Token(token_amount),
             },
             Some(ReceiverInfo {
-                address: hex::encode(vec![0; 32]),
+                address: hex::encode(&[0u8; 32]).parse().unwrap(),
                 asset: Asset::Token(fee_amount),
             }),
             0,
@@ -822,11 +822,11 @@ mod tests {
         let payment_tx_valid = construct_payment_tx(
             tx_ins,
             ReceiverInfo {
-                address: hex::encode(vec![0; 32]),
+                address: hex::encode(&[0u8; 32]).parse().unwrap(),
                 asset: Asset::Token(tokens),
             },
             Some(ReceiverInfo {
-                address: hex::encode(vec![0; 32]),
+                address: hex::encode(&[0u8; 32]).parse().unwrap(),
                 asset: Asset::Token(fees),
             }),
             0,
@@ -855,11 +855,11 @@ mod tests {
         let payment_tx_valid = construct_payment_tx(
             tx_ins,
             ReceiverInfo {
-                address: hex::encode(vec![0; 32]),
+                address: hex::encode(&[0u8; 32]).parse().unwrap(),
                 asset: Asset::Item(item_asset_valid),
             },
             Some(ReceiverInfo {
-                address: hex::encode(vec![0; 32]),
+                address: hex::encode(&[0u8; 32]).parse().unwrap(),
                 asset: Asset::Token(fees),
             }),
             0,
@@ -889,7 +889,7 @@ mod tests {
         let payment_tx_valid = construct_payment_tx(
             tx_ins,
             ReceiverInfo {
-                address: hex::encode(vec![0; 32]),
+                address: hex::encode(&[0u8; 32]).parse().unwrap(),
                 asset: Asset::Item(item_asset_valid),
             },
             None,
@@ -930,7 +930,7 @@ mod tests {
         let payment_tx_1 = construct_payment_tx(
             tx_ins_1,
             ReceiverInfo {
-                address: hex::encode(vec![0; 32]),
+                address: hex::encode(&[0u8; 32]).parse().unwrap(),
                 asset: Asset::Token(token_amount),
             },
             None,
@@ -953,7 +953,7 @@ mod tests {
         let payment_tx_2 = construct_payment_tx(
             tx_ins_2,
             ReceiverInfo {
-                address: hex::encode(&[0u8; 32]),
+                address: hex::encode(&[0u8; 32]).parse().unwrap(),
                 asset: Asset::Token(token_amount),
             },
             None,
@@ -989,7 +989,7 @@ mod tests {
             genesis_hash: None,
         });
 
-        let tx_outs = vec![TxOut::new_asset_v2(to_address, data.clone(), None)];
+        let tx_outs = vec![TxOut::new_asset(to_address, data.clone(), None)];
 
         let signed_tx_ins = update_input_signatures(&tx_ins, &tx_outs, &key_material);
         let from_addr = construct_tx_ins_address(TxVersion::V6, &signed_tx_ins, &tx_outs);
@@ -1028,10 +1028,10 @@ mod tests {
 
         let from_addr = construct_tx_ins_address(TxVersion::V6, &[], &[]);
 
-        let alice_addr = P2PKHAddress::placeholder_indexed(0).to_string();
-        let bob_addr = P2PKHAddress::placeholder_indexed(1).to_string();
+        let alice_addr = P2PKHAddress::placeholder_indexed(0).wrap();
+        let bob_addr = P2PKHAddress::placeholder_indexed(1).wrap();
 
-        let sender_address_excess = P2PKHAddress::placeholder_indexed(2).to_string();
+        let sender_address_excess = P2PKHAddress::placeholder_indexed(2).wrap();
 
         let (pk, sk) = sign::gen_test_keypair(0).unwrap();
         let mut key_material = BTreeMap::new();
@@ -1047,7 +1047,7 @@ mod tests {
 
             let expectation = DruidExpectation {
                 from: from_addr.clone(),
-                to: alice_addr.clone(),
+                to: alice_addr.to_string(),
                 asset: Asset::item(1, Some("genesis_hash".to_owned()), None),
             };
 
@@ -1078,7 +1078,7 @@ mod tests {
             let tx_ins = vec![];
             let expectation = DruidExpectation {
                 from: from_addr,
-                to: bob_addr,
+                to: bob_addr.to_string(),
                 asset: Asset::Token(payment),
             };
 

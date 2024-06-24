@@ -85,7 +85,7 @@ mod tests {
 
         // Alice
         let amount = TokenAmount(10);
-        let alice_addr = P2PKHAddress::placeholder_indexed(0).to_string();
+        let alice_addr = P2PKHAddress::placeholder_indexed(0).wrap();
         let alice_asset = Asset::Token(amount);
 
         // Bob
@@ -94,7 +94,7 @@ mod tests {
             amount: 1,
             genesis_hash: None,
         });
-        let bob_addr = P2PKHAddress::placeholder_indexed(1).to_string();
+        let bob_addr = P2PKHAddress::placeholder_indexed(1).wrap();
 
         // TxOuts
         let token_tx_out = TxOut::new_asset(bob_addr.clone(), alice_asset.clone(), None);
@@ -104,12 +104,12 @@ mod tests {
         let expects = vec![
             DruidExpectation {
                 from: from_addr.clone(),
-                to: bob_addr,
+                to: bob_addr.to_string(),
                 asset: alice_asset,
             },
             DruidExpectation {
                 from: from_addr,
-                to: alice_addr,
+                to: alice_addr.to_string(),
                 asset: bob_asset,
             },
         ];
@@ -146,10 +146,10 @@ mod tests {
 
         let from_addr = construct_tx_ins_address(TxVersion::V6, &[], &[]);
 
-        let alice_addr = P2PKHAddress::placeholder_indexed(0).to_string();
-        let bob_addr = P2PKHAddress::placeholder_indexed(1).to_string();
+        let alice_addr = P2PKHAddress::placeholder_indexed(0).wrap();
+        let bob_addr = P2PKHAddress::placeholder_indexed(1).wrap();
 
-        let sender_address_excess = P2PKHAddress::placeholder_indexed(2).to_string();
+        let sender_address_excess = P2PKHAddress::placeholder_indexed(2).wrap();
         let mut key_material = BTreeMap::new();
 
         // Act
@@ -165,7 +165,7 @@ mod tests {
 
             let expectation = DruidExpectation {
                 from: from_addr.clone(),
-                to: alice_addr.clone(),
+                to: alice_addr.to_string(),
                 asset: Asset::item(1, Some("genesis_hash".to_owned()), None),
             };
 
@@ -198,7 +198,7 @@ mod tests {
             let tx_ins = vec![];
             let expectation = DruidExpectation {
                 from: from_addr,
-                to: bob_addr,
+                to: bob_addr.to_string(),
                 asset: Asset::Token(payment),
             };
 

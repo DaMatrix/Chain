@@ -3045,9 +3045,9 @@ mod tests {
         // Arrange
         //
         let (pk, sk) = sign::gen_test_keypair(0).unwrap();
-        let script_public_key = construct_address(&pk);
+        let script_public_key = P2PKHAddress::from_pubkey(&pk).wrap();
         let tx_in_previous_out =
-            TxOut::new_token_amount(script_public_key.clone(), TokenAmount(5), locktime);
+            TxOut::new_token_amount(script_public_key, TokenAmount(5), locktime);
         let ongoing_tx_outs = vec![tx_in_previous_out.clone()];
 
         let valid_tx_outpoint = OutPoint::placeholder_indexed(0);

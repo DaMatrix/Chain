@@ -16,7 +16,16 @@ pub struct ByteCountingWriter {
     pub count: usize,
 }
 
-impl std::io::Write for ByteCountingWriter {
+impl ByteCountingWriter {
+    /// Creates a new `ByteCountingWriter` with a `count` of 0.
+    pub fn new() -> Self {
+        Self {
+            count: 0,
+        }
+    }
+}
+
+impl Write for ByteCountingWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.count += buf.len();
         Ok(buf.len())
@@ -300,9 +309,7 @@ pub fn bincode_encode_to_write_standard<T: Encode>(
 pub fn bincode_encoded_size_standard<T: Encode>(
     value: &T,
 ) -> Result<usize, bincode::error::EncodeError> {
-    let mut writer = ByteCountingWriter {
-        count: 0,
-    };
+    let mut writer = ByteCountingWriter::new();
     bincode::encode_into_std_write(value, &mut writer, bincode::config::standard())?;
     Ok(writer.count)
 }

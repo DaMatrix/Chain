@@ -393,41 +393,19 @@ pub struct TxOut {
 }
 
 impl TxOut {
-    #[deprecated = "Use new_token_amount_v2"]
-    pub fn new_token_amount(
-        to_address: String,
-        amount: TokenAmount,
-        locktime: Option<u64>,
-    ) -> TxOut {
+    pub fn new_token_amount(to_address: AnyAddress, amount: TokenAmount, locktime: Option<u64>) -> TxOut {
         Self::new_asset(to_address, Asset::Token(amount), locktime)
     }
 
     /// Creates a new TxOut instance for a `Item` asset
     ///
     /// **NOTE:** Only create transactions may have `Item` assets that have a `None` `genesis_hash`
-    #[deprecated = "Use new_item_amount_v2"]
-    pub fn new_item_amount(to_address: String, item: ItemAsset, locktime: Option<u64>) -> TxOut {
+    pub fn new_item_amount(to_address: AnyAddress, item: ItemAsset, locktime: Option<u64>) -> TxOut {
         Self::new_asset(to_address, Asset::Item(item), locktime)
     }
 
-    #[deprecated = "Use new_asset_v2"]
-    pub fn new_asset(to_address: String, asset: Asset, locktime: Option<u64>) -> TxOut {
-        Self::new_asset_v2(to_address.parse().expect(&to_address), asset, locktime)
-    }
-
-    pub fn new_token_amount_v2(to_address: AnyAddress, amount: TokenAmount, locktime: Option<u64>) -> TxOut {
-        Self::new_asset_v2(to_address, Asset::Token(amount), locktime)
-    }
-
-    /// Creates a new TxOut instance for a `Item` asset
-    ///
-    /// **NOTE:** Only create transactions may have `Item` assets that have a `None` `genesis_hash`
-    pub fn new_item_amount_v2(to_address: AnyAddress, item: ItemAsset, locktime: Option<u64>) -> TxOut {
-        Self::new_asset_v2(to_address, Asset::Item(item), locktime)
-    }
-
     //TODO: Add handling for `Data' asset variant
-    pub fn new_asset_v2(to_address: AnyAddress, asset: Asset, locktime: Option<u64>) -> TxOut {
+    pub fn new_asset(to_address: AnyAddress, asset: Asset, locktime: Option<u64>) -> TxOut {
         assert!(matches!(asset, Asset::Item(_) | Asset::Token(_)),
                 "Cannot create TxOut for asset of type {:?}", asset);
         TxOut {

@@ -797,7 +797,7 @@ mod tests {
     use crate::primitives::address::P2PKHAddress;
     use crate::primitives::asset::{Asset, AssetValues, ItemAsset, TokenAmount};
     use crate::primitives::transaction::{OutPoint, Transaction, TxConstructor, TxIn};
-    use crate::utils::{script_utils, transaction_utils};
+    use crate::utils::{Placeholder, script_utils, transaction_utils};
     use crate::utils::transaction_utils::ReceiverInfo;
 
     fn test_construct_valid_inputs() -> (Vec<TxInConstructor<'static>>, BTreeMap<OutPoint, (PublicKey, SecretKey)>) {
@@ -840,7 +840,7 @@ mod tests {
         let payment_tx = transaction_utils::construct_payment_tx(
             tx_ins,
             ReceiverInfo {
-                address: hex::encode(&[0u8; STANDARD_ADDRESS_LENGTH_BYTES]),
+                address: hex::encode(&[0u8; STANDARD_ADDRESS_LENGTH_BYTES]).parse().unwrap(),
                 asset: Asset::Token(tokens),
             },
             None,
@@ -874,11 +874,11 @@ mod tests {
         let payment_tx = transaction_utils::construct_payment_tx(
             tx_ins,
             ReceiverInfo {
-                address: hex::encode(crate::crypto::sha3_256::digest(&(4 as u64).to_le_bytes())),
+                address: P2PKHAddress::placeholder_indexed(4).wrap(),
                 asset: Asset::Token(tokens),
             },
             Some(ReceiverInfo {
-                address: hex::encode(crate::crypto::sha3_256::digest(&(5 as u64).to_le_bytes())),
+                address: P2PKHAddress::placeholder_indexed(5).wrap(),
                 asset: Asset::Token(fees),
             }),
             0,
@@ -909,7 +909,7 @@ mod tests {
         let payment_tx_valid = transaction_utils::construct_payment_tx(
             tx_ins,
             ReceiverInfo {
-                address: hex::encode(crate::crypto::sha3_256::digest(&(4 as u64).to_le_bytes())),
+                address: P2PKHAddress::placeholder_indexed(4).wrap(),
                 asset: Asset::Item(item_asset_valid),
             },
             None,
@@ -941,11 +941,11 @@ mod tests {
         let payment_tx_valid = transaction_utils::construct_payment_tx(
             tx_ins,
             ReceiverInfo {
-                address: hex::encode(crate::crypto::sha3_256::digest(&(4 as u64).to_le_bytes())),
+                address: P2PKHAddress::placeholder_indexed(4).wrap(),
                 asset: Asset::Item(item_asset_valid),
             },
             Some(ReceiverInfo {
-                address: hex::encode(crate::crypto::sha3_256::digest(&(5 as u64).to_le_bytes())),
+                address: P2PKHAddress::placeholder_indexed(5).wrap(),
                 asset: Asset::Token(fees),
             }),
             0,
@@ -984,7 +984,7 @@ mod tests {
         let payment_tx_1 = transaction_utils::construct_payment_tx(
             tx_ins_1,
             ReceiverInfo {
-                address: hex::encode(crate::crypto::sha3_256::digest(&(4 as u64).to_le_bytes())),
+                address: P2PKHAddress::placeholder_indexed(4).wrap(),
                 asset: Asset::Token(token_amount),
             },
             None,
@@ -1007,7 +1007,7 @@ mod tests {
         let payment_tx_2 = transaction_utils::construct_payment_tx(
             tx_ins_2,
             ReceiverInfo {
-                address: hex::encode(crate::crypto::sha3_256::digest(&(5 as u64).to_le_bytes())),
+                address: P2PKHAddress::placeholder_indexed(5).wrap(),
                 asset: Asset::Token(token_amount),
             },
             None,

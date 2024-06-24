@@ -58,11 +58,24 @@ pub enum ParseAddressError {
 });
 
 macro_rules! standard_address_type {
-    ($doc:literal, $name:ident, $prefix:literal) => {
+    ($doc:literal, $name:ident, $prefix:literal, $anyname:ident) => {
         #[doc = $doc]
         #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize, Encode, Decode)]
         #[serde(transparent)]
         pub struct $name { standard_address: StandardAddress }
+
+        impl $name {
+            /// Wraps this address into an `AnyAddress`
+            pub fn wrap(self) -> AnyAddress {
+                AnyAddress::$anyname(self)
+            }
+        }
+
+        impl From<$name> for AnyAddress {
+            fn from(value: $name) -> Self {
+                value.wrap()
+            }
+        }
 
         impl From<StandardAddress> for $name {
             fn from(standard_address: StandardAddress) -> Self {
@@ -96,7 +109,7 @@ macro_rules! standard_address_type {
     };
 }
 
-standard_address_type!("The type of address used for P2PKH outputs", P2PKHAddress, "");
+standard_address_type!("The type of address used for P2PKH outputs", P2PKHAddress, "", P2PKH);
 
 impl P2PKHAddress {
     /// Creates a new P2PKH address from the hash of the given public key.
@@ -105,7 +118,7 @@ impl P2PKHAddress {
     }
 }
 
-//standard_address_type!("The type of address used for P2SH outputs", P2SHAddress, "H");
+//standard_address_type!("The type of address used for P2SH outputs", P2SHAddress, "H", P2SH);
 
 /// Wrapper enum representing an address of any type.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Encode, Decode)]
@@ -128,9 +141,9 @@ impl AnyAddress {
 impl Display for AnyAddress {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match self {
+            AnyAddress::Burn => f.write_str("BURN"),
             AnyAddress::P2PKH(address) => address.fmt(f),
             //AnyAddress::P2SH(address) => address.fmt(f),
-            AnyAddress::Burn => f.write_str("BURN"),
         }
     }
 }
@@ -155,9 +168,9 @@ make_trivial_enum!(
 #[doc = "The different kinds of addresses."]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AddressSort {
+    Burn,
     P2PKH,
     //P2SH,
-    Burn,
 }
 all_variants=ALL_SORTS);
 
