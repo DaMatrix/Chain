@@ -250,86 +250,6 @@ pub fn tx_outs_are_valid_full(tx_outs: &[TxOut], fees: &[TxOut], tx_ins_spent: A
     Ok(())
 }
 
-pub enum MatchV6Script<'a> {
-    Coinbase { 
-        block_number: u64,
-    },
-    Create {
-        block_number: u64,
-        asset_hash: &'a [u8],
-        signature: Signature,
-        public_key: PublicKey,
-    },
-    P2PKH {
-        check_data: &'a [u8],
-        signature: Signature,
-        public_key: PublicKey,
-        public_key_hash: &'a [u8],
-    },
-}
-
-/// Checks if a script matches any of the known v6 script patterns and extracts the relevant fields.
-///
-/// ### Arguments
-///
-/// * `script`      - Script to match
-pub fn match_v6_script(script: &Script) -> Result<MatchV6Script, Script> {
-    if let Some(block_number) = match_coinbase_script(script) {
-        Ok(MatchV6Script::Coinbase { block_number })
-    } else if let Some((check_data, signature, public_key, public_key_hash)) = match_p2pkh_script(script) {
-        Ok(MatchV6Script::P2PKH { check_data, signature, public_key, public_key_hash })
-    } else if let Some((block_number, asset_hash, signature, public_key)) = match_create_script(script) {
-        Ok(MatchV6Script::Create { block_number, asset_hash, signature, public_key })
-    } else {
-        Err(script.clone())
-    }
-}
-
-/// Checks if a script matches the coinbase pattern and extracts the relevant fields.
-///
-/// ### Arguments
-///
-/// * `script`      - Script to match
-pub fn match_coinbase_script(
-    script: &Script,
-) -> Option<u64> {
-    if let Some([
-                ScriptEntry::Int(block_number),
-                ]) = array_match_slice_copy(&script.to_entries().ok()?) {
-        Some(block_number)
-    } else {
-        None
-    }
-}
-
-/// Checks if a script matches the item creation pattern and extracts the relevant fields.
-///
-/// ### Arguments
-///
-/// * `script`      - Script to match
-pub fn match_create_script(
-    script: &Script,
-) -> Option<(u64, &[u8], Signature, PublicKey)> {
-    if let Some([
-                ScriptEntry::Op(OpCodes::OP_CREATE),
-                ScriptEntry::Int(block_number),
-                ScriptEntry::Op(OpCodes::OP_DROP),
-                ScriptEntry::Data(b),
-                ScriptEntry::Data(signature),
-                ScriptEntry::Data(public_key),
-                ScriptEntry::Op(OpCodes::OP_CHECKSIG),
-                ]) = array_match_slice_copy(&script.to_entries().ok()?) {
-        Some((
-            block_number,
-            b,
-            Signature::from_slice(signature)?,
-            PublicKey::from_slice(public_key)?,
-        ))
-    } else {
-        None
-    }
-}
-
 make_error_type!(
 #[derive(PartialEq)]
 pub enum CreateValidationError {
@@ -341,21 +261,22 @@ pub enum CreateValidationError {
         asset_hash: String,
         check_data: String,
     }; "Item asset hash \"{asset_hash}\" doesn't match creation script check_data \"{check_data}\"",
-    ItemScriptFailed {
-        cause: ScriptError,
-    }; "Interpreting item creation script failed: {cause}"; cause,
-    ItemInvalidScript {
-        script: Script,
-    }; "Invalid item creation script: {script:?}",
+    InvalidSignature {
+        asset_hash: String,
+        input: CreateTxIn,
+    }; "CreateItem input {input:?} has invalid signature for asset_hash \"{asset_hash}\"",
 });
 
 /// Checks whether a create transaction has a valid input script
 ///
 /// ### Arguments
 ///
-/// * `script`      - Script to validate
+/// * `input`       - CreateAsset transaction input
 /// * `asset`       - Asset to be created
-pub fn tx_has_valid_create_script(script: &Script, asset: &Asset) -> Result<(), CreateValidationError> {
+pub fn tx_has_valid_create_script(
+    input: &CreateTxIn,
+    asset: &Asset,
+) -> Result<(), CreateValidationError> {
     let asset_hash = construct_tx_in_signable_asset_hash(asset);
 
     if let Asset::Item(r) = asset {
@@ -368,56 +289,24 @@ pub fn tx_has_valid_create_script(script: &Script, asset: &Asset) -> Result<(), 
         }
     }
 
-    if let Some((_, b, _, _)) = match_create_script(script) {
-        // For legacy reasons, the hashed data is the hex representation of the data rather than
-        // the data itself.
-        let b_hex = hex::encode(b);
+    // For legacy reasons, the hashed data is the hex representation of the data rather than
+    // the data itself.
+    let asset_hash_hex = hex::encode(&input.asset_hash);
 
-        if b_hex != asset_hash {
-            return Err(CreateValidationError::ItemHashMismatch {
-                asset_hash,
-                check_data: b_hex,
-            });
-        }
-
-        return match script.interpret_full() {
-            Ok(()) => Ok(()),
-            Err(cause) => Err(CreateValidationError::ItemScriptFailed { cause })
-        };
+    if asset_hash_hex != asset_hash {
+        return Err(CreateValidationError::ItemHashMismatch {
+            asset_hash,
+            check_data: asset_hash_hex,
+        });
+    }
+    if !sign_ed25519::verify_detached(&input.signature, asset_hash.as_bytes(), &input.public_key) {
+        return Err(CreateValidationError::InvalidSignature {
+            asset_hash,
+            input: input.clone(),
+        });
     }
 
-    Err(CreateValidationError::ItemInvalidScript {
-        script: script.clone(),
-    })
-}
-
-/// Checks if a script matches the P2PKH pattern and extracts the relevant fields.
-///
-/// ### Arguments
-///
-/// * `script`      - Script to match
-pub fn match_p2pkh_script(
-    script: &Script,
-) -> Option<(&[u8], Signature, PublicKey, &[u8])> {
-    if let Some([
-                ScriptEntry::Data(check_data),
-                ScriptEntry::Data(signature),
-                ScriptEntry::Data(public_key),
-                ScriptEntry::Op(OpCodes::OP_DUP),
-                ScriptEntry::Op(OpCodes::OP_HASH256),
-                ScriptEntry::Data(public_key_hash),
-                ScriptEntry::Op(OpCodes::OP_EQUALVERIFY),
-                ScriptEntry::Op(OpCodes::OP_CHECKSIG),
-                ]) = array_match_slice_copy(&script.to_entries().ok()?) {
-        Some((
-            check_data,
-            Signature::from_slice(signature)?,
-            PublicKey::from_slice(public_key)?,
-            public_key_hash,
-        ))
-    } else {
-        None
-    }
+    Ok(())
 }
 
 make_error_type!(
@@ -2871,28 +2760,85 @@ mod tests {
     fn test_pass_create_script_valid() {
         let asset = Asset::item(1, None, None);
         let asset_hash = construct_tx_in_signable_asset_hash(&asset);
-        let (pk, sk) = sign::gen_keypair().unwrap();
+        let (pk, sk) = sign::gen_test_keypair(0).unwrap();
         let signature = sign::sign_detached(asset_hash.as_bytes(), &sk);
 
-        let script = Script::new_create_asset(0, asset_hash, signature, pk);
-        assert_eq!(tx_has_valid_create_script(&script, &asset), Ok(()),
-                "invalid create script: {:?}", script);
+        let input = CreateTxIn {
+            block_number: 0,
+            asset_hash: hex::decode(&asset_hash).unwrap(),
+            public_key: pk,
+            signature,
+        };
+        assert_eq!(tx_has_valid_create_script(&input, &asset), Ok(()),
+                "invalid create script: {:?}", input);
     }
 
     #[test]
     /// Checks that metadata is validated correctly if too large
-    fn test_fail_create_item_script_invalid() {
+    fn test_fail_create_item_script_invalid_metadata() {
         let metadata = String::from_utf8_lossy(&[0; MAX_METADATA_BYTES + 1]).to_string();
         let asset = Asset::item(1, None, Some(metadata));
         let asset_hash = construct_tx_in_signable_asset_hash(&asset);
-        let (pk, sk) = sign::gen_keypair().unwrap();
+        let (pk, sk) = sign::gen_test_keypair(0).unwrap();
         let signature = sign::sign_detached(asset_hash.as_bytes(), &sk);
 
-        let script = Script::new_create_asset(0, asset_hash, signature, pk);
+        let input = CreateTxIn {
+            block_number: 0,
+            asset_hash: hex::decode(&asset_hash).unwrap(),
+            public_key: pk,
+            signature,
+        };
         assert_eq!(
-            tx_has_valid_create_script(&script, &asset),
+            tx_has_valid_create_script(&input, &asset),
             Err(CreateValidationError::ItemMetadataTooLarge { metadata_size: MAX_METADATA_BYTES + 1 }),
-            "invalid create asset script: {:?}", script);
+            "invalid create asset script: {:?}", input);
+    }
+
+    #[test]
+    /// Checks that metadata is validated correctly if the asset hash doesn't match
+    fn test_fail_create_item_script_invalid_asset_hash() {
+        let asset = Asset::item(1, None, None);
+        let asset_hash = construct_tx_in_signable_asset_hash(&asset);
+        let bad_asset_hash = String::from_utf8(vec!['0' as u8; asset_hash.len()]).unwrap();
+        let (pk, sk) = sign::gen_test_keypair(0).unwrap();
+        let signature = sign::sign_detached(asset_hash.as_bytes(), &sk);
+
+        let input = CreateTxIn {
+            block_number: 0,
+            asset_hash: hex::decode(&bad_asset_hash).unwrap(),
+            public_key: pk,
+            signature,
+        };
+        assert_eq!(
+            tx_has_valid_create_script(&input, &asset),
+            Err(CreateValidationError::ItemHashMismatch {
+                asset_hash: asset_hash.clone(),
+                check_data: bad_asset_hash.clone(),
+            }),
+            "invalid create asset script: {:?}", input);
+    }
+
+    #[test]
+    /// Checks that metadata is validated correctly if the signature doesn't match
+    fn test_fail_create_item_script_invalid_signature() {
+        let asset = Asset::item(1, None, None);
+        let asset_hash = construct_tx_in_signable_asset_hash(&asset);
+        let (pk, sk) = sign::gen_test_keypair(0).unwrap();
+        let bad_signature = sign::sign_detached(&[], &sk);
+
+        let input = CreateTxIn {
+            block_number: 0,
+            asset_hash: hex::decode(&asset_hash).unwrap(),
+            public_key: pk,
+            signature: bad_signature,
+        };
+        assert_eq!(
+            tx_has_valid_create_script(&input, &asset),
+            Err(CreateValidationError::InvalidSignature {
+                asset_hash: asset_hash.clone(),
+                input: input.clone(),
+            }),
+            "invalid create asset script: {:?}", input);
     }
 
     #[test]

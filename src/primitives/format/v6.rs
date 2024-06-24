@@ -8,7 +8,6 @@ use crate::primitives::transaction::*;
 use crate::script::lang::{Script, ScriptBuilder};
 use crate::script::{OpCodes, ScriptError};
 use crate::utils::{script_utils, transaction_utils};
-use crate::utils::script_utils::MatchV6Script;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 struct V6PublicKey(
@@ -571,38 +570,6 @@ fn downgrade_v6_asset(old: &Asset) -> Result<V6Asset, ToV6Error> {
                 metadata: metadata.clone(),
             })),
     }
-}
-
-fn downgrade_v6_script(script: &Script) -> Result<V6Script, ToV6Error> {
-    let v6_script = match script_utils::match_v6_script(script).expect("unknown or unsupported v6 script") {
-        MatchV6Script::Coinbase { block_number } =>
-            vec![ V6StackEntry::Num(block_number) ],
-        MatchV6Script::Create { block_number, asset_hash, signature, public_key } =>
-            vec![
-                V6StackEntry::Op(V6OpCodes::OP_CREATE),
-                V6StackEntry::Num(block_number),
-                V6StackEntry::Op(V6OpCodes::OP_DROP),
-                V6StackEntry::Bytes(hex::encode(asset_hash)),
-                V6StackEntry::Signature(V6Signature(signature.as_ref().try_into().unwrap())),
-                V6StackEntry::PubKey(V6PublicKey(public_key.as_ref().try_into().unwrap())),
-                V6StackEntry::Op(V6OpCodes::OP_CHECKSIG),
-            ],
-        MatchV6Script::P2PKH { check_data, signature, public_key, public_key_hash } =>
-            vec![
-                V6StackEntry::Bytes(hex::encode(check_data)),
-                V6StackEntry::Signature(V6Signature(signature.as_ref().try_into().unwrap())),
-                V6StackEntry::PubKey(V6PublicKey(public_key.as_ref().try_into().unwrap())),
-                V6StackEntry::Op(V6OpCodes::OP_DUP),
-                V6StackEntry::Op(V6OpCodes::OP_HASH256),
-                V6StackEntry::Bytes(hex::encode(public_key_hash)),
-                V6StackEntry::Op(V6OpCodes::OP_EQUALVERIFY),
-                V6StackEntry::Op(V6OpCodes::OP_CHECKSIG),
-            ],
-    };
-
-    Ok(V6Script {
-        stack: v6_script,
-    })
 }
 
 fn downgrade_v6_outpoint(old: &OutPoint) -> Result<V6OutPoint, ToV6Error> {
