@@ -69,7 +69,33 @@ pub trait Placeholder : Sized {
 /// of a type, which can be used for test purposes. These placeholder values are consistent
 /// across program runs.
 #[cfg(test)]
-pub trait PlaceholderIndexed : Sized {
+pub trait PlaceholderSeed: Sized + PartialEq {
+    /// Gets a dummy valid of this type which can be used for test purposes.
+    ///
+    /// This allows acquiring multiple distinct placeholder values which are still consistent
+    /// between runs.
+    ///
+    /// ### Arguments
+    ///
+    /// * `seed_parts`  - the parts of the seed for the placeholder value to obtain. Two placeholder
+    ///                   values generated from the same seed are guaranteed to be equal (even
+    ///                   across multiple test runs, so long as the value format doesn't change).
+    fn placeholder_seed_parts<'a>(seed_parts: impl IntoIterator<Item = &'a [u8]>) -> Self;
+
+    /// Gets a dummy valid of this type which can be used for test purposes.
+    ///
+    /// This allows acquiring multiple distinct placeholder values which are still consistent
+    /// between runs.
+    ///
+    /// ### Arguments
+    ///
+    /// * `seed`  - the seed for the placeholder value to obtain. Two placeholder
+    ///             values generated from the same seed are guaranteed to be equal (even
+    ///             across multiple test runs, so long as the value format doesn't change).
+    fn placeholder_seed(seed: impl AsRef<[u8]>) -> Self {
+        Self::placeholder_seed_parts([ seed.as_ref() ])
+    }
+
     /// Gets a dummy valid of this type which can be used for test purposes.
     ///
     /// This allows acquiring multiple distinct placeholder values which are still consistent
@@ -80,18 +106,27 @@ pub trait PlaceholderIndexed : Sized {
     /// * `index`  - the index of the placeholder value to obtain. Two placeholder values generated
     ///              from the same index are guaranteed to be equal (even across multiple test runs,
     ///              so long as the value format doesn't change).
-    fn placeholder_indexed(index: u64) -> Self;
+    fn placeholder_indexed(index: u64) -> Self {
+        Self::placeholder_seed_parts([ index.to_le_bytes().as_slice() ])
+    }
+
+    /// Gets an array of placeholder values of this type which can be used for test purposes.
+    fn placeholder_array_seed<const N: usize>(seed: impl AsRef<[u8]>) -> [Self; N] {
+        core::array::from_fn(|n| Self::placeholder_seed_parts(
+            [ seed.as_ref(), &(n as u64).to_le_bytes() ]
+        ))
+    }
 
     /// Gets an array of placeholder values of this type which can be used for test purposes.
     fn placeholder_array_indexed<const N: usize>(base_index: u64) -> [Self; N] {
-        core::array::from_fn(|n| Self::placeholder_indexed(base_index.wrapping_add(n as u64)))
+        Self::placeholder_array_seed(base_index.to_le_bytes())
     }
 }
 
 #[cfg(test)]
-impl<T: PlaceholderIndexed> Placeholder for T {
+impl<T: PlaceholderSeed> Placeholder for T {
     fn placeholder() -> Self {
-        Self::placeholder_indexed(0)
+        <Self as PlaceholderSeed>::placeholder_seed_parts([])
     }
 }
 
@@ -104,7 +139,9 @@ impl<T: PlaceholderIndexed> Placeholder for T {
 ///
 /// * `seed_parts`   - the parts of the seed, which will be concatenated to form the RNG seed
 #[cfg(test)]
-pub fn placeholder_bytes<const N: usize>(seed_parts: &[&[u8]]) -> [u8; N] {
+pub fn placeholder_bytes<'a, const N: usize>(
+    seed_parts: impl IntoIterator<Item = &'a [u8]>
+) -> [u8; N] {
     // Use Shake-256 to generate an arbitrarily large number of random bytes based on the given seed.
     let mut shake256 = sha3::Shake256::default();
     for slice in seed_parts {
