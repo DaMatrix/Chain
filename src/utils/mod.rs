@@ -9,6 +9,7 @@ pub mod druid_utils;
 pub mod error_utils;
 pub mod script_utils;
 pub mod serialize_utils;
+#[cfg(test)]
 pub mod test_utils;
 pub mod transaction_utils;
 

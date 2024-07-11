@@ -735,9 +735,10 @@ pub fn construct_dde_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::sign_ed25519::{self as sign, Signature};
+    use crate::crypto::sign_ed25519::{self, self as sign, Signature};
     use crate::primitives::asset::{AssetValues, ItemAsset, TokenAmount};
     use crate::script::OpCodes;
+    use crate::utils::Placeholder;
     use crate::utils::script_utils::{tx_has_valid_p2sh_script, tx_outs_are_valid};
 
     #[test]
@@ -759,10 +760,9 @@ mod tests {
     }
 
     fn test_construct_valid_inputs(address_version: Option<u64>) -> (Vec<TxIn>, String, BTreeMap<OutPoint, (PublicKey, SecretKey)>) {
-        let (_pk, sk) = sign::gen_keypair();
-        let (pk, _sk) = sign::gen_keypair();
+        let (pk, sk) = Placeholder::placeholder();
         let t_hash = vec![0, 0, 0];
-        let signature = sign::sign_detached(&t_hash, &sk);
+        let signature = sign_ed25519::sign_detached(&t_hash, &sk);
         let drs_block_hash = hex::encode(vec![1, 2, 3, 4, 5, 6]);
         let mut key_material = BTreeMap::new();
         let prev_out = OutPoint::new(hex::encode(t_hash), 0);
@@ -915,8 +915,7 @@ mod tests {
     #[test]
     /// Creates a valid payment transaction including fees
     fn test_token_onspend_with_fees() {
-        let (_pk, sk) = sign::gen_keypair();
-        let (pk, _sk) = sign::gen_keypair();
+        let (pk, sk) = Placeholder::placeholder();
         let t_hash = vec![0, 0, 0];
         let signature = sign::sign_detached(&t_hash, &sk);
         let tokens = TokenAmount(400000);
@@ -959,8 +958,7 @@ mod tests {
     #[test]
     /// Checks the validity of on-spend for items with fees
     fn test_item_onspend_with_fees() {
-        let (_pk, sk) = sign::gen_keypair();
-        let (pk, _sk) = sign::gen_keypair();
+        let (pk, sk) = Placeholder::placeholder();
         let t_hash = vec![0, 0, 0];
         let signature = sign::sign_detached(&t_hash, &sk);
         let fees = TokenAmount(1000);
@@ -1007,8 +1005,7 @@ mod tests {
     #[test]
     /// Checks the validity of the metadata on-spend for items
     fn test_item_onspend_metadata() {
-        let (_pk, sk) = sign::gen_keypair();
-        let (pk, _sk) = sign::gen_keypair();
+        let (pk, sk) = Placeholder::placeholder();
         let t_hash = vec![0, 0, 0];
         let signature = sign::sign_detached(&t_hash, &sk);
         let prev_out = OutPoint::new(hex::encode(t_hash), 0);
@@ -1068,7 +1065,7 @@ mod tests {
     }
 
     fn test_construct_valid_utxo_set_common(address_version: Option<u64>) {
-        let (pk, sk) = sign::gen_keypair();
+        let (pk, sk) = Placeholder::placeholder();
 
         let t_hash_1 = hex::encode(vec![0, 0, 0]);
         let signed = sign::sign_detached(t_hash_1.as_bytes(), &sk);
@@ -1150,8 +1147,7 @@ mod tests {
     }
 
     fn test_construct_a_valid_dde_tx_common(address_version: Option<u64>) {
-        let (_pk, sk) = sign::gen_keypair();
-        let (pk, _sk) = sign::gen_keypair();
+        let (pk, sk) = Placeholder::placeholder();
         let t_hash = hex::encode(vec![0, 0, 0]);
         let signature = sign::sign_detached(t_hash.as_bytes(), &sk);
         let prev_out = OutPoint::new(hex::encode(&t_hash), 0);
@@ -1225,7 +1221,7 @@ mod tests {
 
         let sender_address_excess = "11112".to_owned();
 
-        let (pk, sk) = sign::gen_keypair();
+        let (pk, sk) = Placeholder::placeholder();
         let mut key_material = BTreeMap::new();
 
         // Act
