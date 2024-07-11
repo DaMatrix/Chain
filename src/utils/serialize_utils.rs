@@ -1,20 +1,32 @@
 use std::any::TypeId;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::io::Write;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
+use bincode::{BorrowDecode, Decode, Encode};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde::de::{SeqAccess, Visitor};
 use serde::ser::{SerializeTuple};
 
 /// Implements `Write` by simply counting the number of bytes written to it.
+#[derive(Copy, Clone, Debug)]
 pub struct ByteCountingWriter {
     pub count: usize,
 }
 
-impl std::io::Write for ByteCountingWriter {
+impl ByteCountingWriter {
+    /// Creates a new `ByteCountingWriter` with a `count` of 0.
+    pub fn new() -> Self {
+        Self {
+            count: 0,
+        }
+    }
+}
+
+impl Write for ByteCountingWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.count += buf.len();
         Ok(buf.len())
@@ -29,7 +41,7 @@ impl std::io::Write for ByteCountingWriter {
 ///
 /// This can be formatted to and parsed from a hexadecimal string using `Display` and `FromStr`.
 /// When serialized as JSON, it is also represented as a hexadecimal string.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Encode, Decode)]
 pub struct FixedByteArray<const N: usize>(
     #[serde(with = "fixed_array_codec")]
     [u8; N],
@@ -129,7 +141,7 @@ impl<const N: usize> FromStr for FixedByteArray<N> {
     }
 }
 
-/// A codec for fixed-size arrays.
+/// A serde codec for fixed-size arrays.
 pub mod fixed_array_codec {
     use super::*;
 
@@ -187,7 +199,7 @@ pub mod fixed_array_codec {
     }
 }
 
-/// A codec for variable-length `Vec`s.
+/// A serde codec for variable-length `Vec`s.
 pub mod vec_codec {
     use super::*;
 
@@ -255,6 +267,102 @@ fn vec_to_fixed_array<E: serde::de::Error, T, const N: usize>(
 ) -> Result<[T; N], E> {
     <[T; N]>::try_from(vec)
         .map_err(|vec| E::custom(format!("expected exactly {} elements, but read {}", N, vec.len())))
+}
+
+/// Encodes an object into a `Vec<u8>` using bincode 2's standard configuration.
+///
+/// This allows using the turbofish operator to explicitly specify the encode type without also
+/// having to specify the config type.
+///
+/// ### Arguments
+///
+/// * `value` - the value to encode
+#[inline(always)]
+pub fn bincode_encode_to_vec_standard<T: Encode>(
+    value: &T,
+) -> Result<Vec<u8>, bincode::error::EncodeError> {
+    bincode::encode_to_vec(value, bincode::config::standard())
+}
+
+/// Encodes an object into the given `Write` using bincode 2's standard configuration.
+///
+/// This allows using the turbofish operator to explicitly specify the encode type without also
+/// having to specify the config type.
+///
+/// ### Arguments
+///
+/// * `value` - the value to encode
+/// * `write` - the `Write` to encode into
+#[inline(always)]
+pub fn bincode_encode_to_write_standard<T: Encode>(
+    value: &T,
+    write: &mut impl Write,
+) -> Result<usize, bincode::error::EncodeError> {
+    bincode::encode_into_std_write(value, write, bincode::config::standard())
+}
+
+/// Calculates the encoded size of the given object using bincode 2's standard configuration.
+///
+/// ### Arguments
+///
+/// * `value` - the value to encode
+#[inline(always)]
+pub fn bincode_encoded_size_standard<T: Encode>(
+    value: &T,
+) -> Result<usize, bincode::error::EncodeError> {
+    let mut writer = ByteCountingWriter::new();
+    bincode::encode_into_std_write(value, &mut writer, bincode::config::standard())?;
+    Ok(writer.count)
+}
+
+/// Decodes an object from a slice using bincode 2's standard configuration.
+///
+/// This allows using the turbofish operator to explicitly specify the decode type without also
+/// having to specify the config type.
+///
+/// ### Arguments
+///
+/// * `slice` - the slice to decode from
+#[inline(always)]
+pub fn bincode_decode_from_slice_standard<T: Decode>(
+    slice: &[u8],
+) -> Result<(T, usize), bincode::error::DecodeError> {
+    bincode::decode_from_slice(slice, bincode::config::standard())
+}
+
+/// Decodes an object from a slice using bincode 2's standard configuration.
+///
+/// This allows using the turbofish operator to explicitly specify the decode type without also
+/// having to specify the config type.
+///
+/// ### Arguments
+///
+/// * `slice` - the slice to decode from
+pub fn bincode_decode_from_slice_standard_full<T: Decode>(
+    slice: &[u8],
+) -> Result<T, bincode::error::DecodeError> {
+    let (result, read_bytes) = bincode_decode_from_slice_standard::<T>(slice)?;
+    if read_bytes == slice.len() {
+        Ok(result)
+    } else {
+        Err(bincode::error::DecodeError::OtherString(
+            format!("{} bytes left over after decoding", slice.len() - read_bytes)))
+    }
+}
+
+/// Decodes an object from a slice using bincode 2's standard configuration.
+///
+/// This allows using the turbofish operator to explicitly specify the decode type without also
+/// having to specify the config type.
+///
+/// ### Arguments
+///
+/// * `slice` - the slice to decode from
+#[inline(always)]
+pub fn bincode_borrow_decode_from_slice_standard<'a, T: BorrowDecode<'a>>(
+    slice: &'a [u8],
+) -> Result<(T, usize), bincode::error::DecodeError> {
+    bincode::borrow_decode_from_slice(slice, bincode::config::standard())
 }
 
 /*---- TESTS ----*/
