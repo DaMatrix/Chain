@@ -1,6 +1,5 @@
 pub use ring;
 use tracing::warn;
-use crate::utils::serialize_utils::FixedByteArray;
 
 macro_rules! fixed_bytes_wrapper {
     ($vis:vis struct $name:ident, $n:expr, $doc:literal) => {
@@ -33,6 +32,15 @@ macro_rules! fixed_bytes_wrapper {
                 <crate::utils::serialize_utils::FixedByteArray<$n> as std::str::FromStr>::from_str(s).map(Self)
             }
         }
+
+        #[cfg(test)]
+        impl crate::utils::PlaceholderSeed for $name {
+            fn placeholder_seed_parts<'a>(seed_parts: impl IntoIterator<Item=&'a [u8]>) -> Self {
+                Self(crate::utils::placeholder_bytes(
+                    [ concat!(stringify!($name), ":").as_bytes() ].iter().copied().chain(seed_parts)
+                ).into())
+            }
+        }
     };
 }
 
@@ -44,15 +52,15 @@ pub mod sign_ed25519 {
     pub use ring::signature::{ED25519, ED25519_PUBLIC_KEY_LEN};
     use serde::{Deserialize, Serialize};
     use std::convert::TryInto;
-    use tracing::warn;
-
-    pub type PublicKeyBase = <SecretKey as KeyPair>::PublicKey;
+    use crate::crypto::generate_random;
 
     // Constants copied from the ring library
     const SCALAR_LEN: usize = 32;
     const ELEM_LEN: usize = 32;
     const SIGNATURE_LEN: usize = ELEM_LEN + SCALAR_LEN;
     pub const ED25519_SIGNATURE_LEN: usize = SIGNATURE_LEN;
+
+    pub const ED25519_SEED_LEN: usize = 32;
 
     fixed_bytes_wrapper!(pub struct Signature, ED25519_SIGNATURE_LEN, "Signature data");
     fixed_bytes_wrapper!(pub struct PublicKey, ED25519_PUBLIC_KEY_LEN, "Public key data");
@@ -64,8 +72,49 @@ pub mod sign_ed25519 {
     pub struct SecretKey(#[serde(with = "crate::utils::serialize_utils::vec_codec")] Vec<u8>);
 
     impl SecretKey {
+        /// Constructs a `SecretKey` from the given PKCS8 document.
+        ///
+        /// ### Arguments
+        ///
+        /// * `slice`  - a slice containing the encoded PKCS8 document
         pub fn from_slice(slice: &[u8]) -> Option<Self> {
-            Some(Self(slice.to_vec()))
+            match SecretKeyBase::from_pkcs8(slice) {
+                Ok(_) => Some(Self(slice.to_vec())),
+                Err(_) => None,
+            }
+        }
+
+        /// Gets the public key corresponding to this secret key.
+        pub fn get_public_key(&self) -> PublicKey {
+            let keypair = SecretKeyBase::from_pkcs8(&self.0)
+                .expect("SecretKey contains invalid PKCS8 document?!?");
+
+            PublicKey::from_slice(keypair.public_key().as_ref())
+                .expect("Keypair public key length is invalid?!?")
+        }
+    }
+
+    impl From<ring::pkcs8::Document> for SecretKey {
+        fn from(value: ring::pkcs8::Document) -> Self {
+            Self(value.as_ref().to_vec())
+        }
+    }
+
+    #[cfg(test)]
+    impl crate::utils::PlaceholderSeed for SecretKey {
+        fn placeholder_seed_parts<'a>(seed_parts: impl IntoIterator<Item=&'a [u8]>) -> Self {
+            gen_keypair_from_seed(&crate::utils::placeholder_bytes(
+                [ "SecretKey:".as_bytes() ].iter().copied().chain(seed_parts)
+            )).1
+        }
+    }
+
+    #[cfg(test)]
+    impl crate::utils::PlaceholderSeed for (PublicKey, SecretKey) {
+        fn placeholder_seed_parts<'a>(seed_parts: impl IntoIterator<Item=&'a [u8]>) -> Self {
+            gen_keypair_from_seed(&crate::utils::placeholder_bytes(
+                [ "(PublicKey, SecretKey):".as_bytes() ].iter().copied().chain(seed_parts)
+            ))
         }
     }
 
@@ -81,83 +130,41 @@ pub mod sign_ed25519 {
     }
 
     pub fn sign_detached(msg: &[u8], sk: &SecretKey) -> Signature {
-        let secret = match SecretKeyBase::from_pkcs8(sk.as_ref()) {
-            Ok(secret) => secret,
-            Err(_) => {
-                warn!("Invalid secret key");
-                return Signature([0; ED25519_SIGNATURE_LEN].into());
-            }
-        };
+        let keypair = SecretKeyBase::from_pkcs8(sk.as_ref())
+                .expect("Invalid PKCS8 secret key?!?");
 
-        let signature = match secret.sign(msg).as_ref().try_into() {
-            Ok(signature) => signature,
-            Err(_) => {
-                warn!("Invalid signature");
-                return Signature([0; ED25519_SIGNATURE_LEN].into());
-            }
-        };
+        let signature = keypair.sign(msg).as_ref().try_into()
+            .expect("Invalid signature?!?");
         Signature(signature)
     }
 
-    pub fn verify_append(sm: &[u8], pk: &PublicKey) -> bool {
-        if sm.len() > ED25519_SIGNATURE_LEN {
-            let start = sm.len() - ED25519_SIGNATURE_LEN;
-            let sig = Signature(match sm[start..].try_into() {
-                Ok(sig) => sig,
-                Err(_) => {
-                    warn!("Invalid signature");
-                    return false;
-                }
-            });
-            let msg = &sm[..start];
-            verify_detached(&sig, msg, pk)
-        } else {
-            false
-        }
-    }
-
-    pub fn sign_append(msg: &[u8], sk: &SecretKey) -> Vec<u8> {
-        let sig = sign_detached(msg, sk);
-        let mut sm = msg.to_vec();
-        sm.extend_from_slice(sig.as_ref());
-        sm
-    }
-
+    /// Generates a completely random Ed25519 keypair.
     pub fn gen_keypair() -> (PublicKey, SecretKey) {
-        let rand = ring::rand::SystemRandom::new();
-        let pkcs8 = match SecretKeyBase::generate_pkcs8(&rand) {
-            Ok(pkcs8) => pkcs8,
-            Err(_) => {
-                warn!("Failed to generate secret key base for pkcs8");
-                return (PublicKey([0; ED25519_PUBLIC_KEY_LEN].into()), SecretKey(vec![]));
-            }
+        let seed = generate_random();
+        gen_keypair_from_seed(&seed)
+    }
+
+    /// Generates an Ed25519 keypair based on the given seed.
+    ///
+    /// ### Arguments
+    ///
+    /// * `seed`   - the seed to generate the keypair from
+    fn gen_keypair_from_seed(seed: &[u8; ED25519_SEED_LEN]) -> (PublicKey, SecretKey) {
+        let rand = ring::test::rand::FixedSliceSequenceRandom {
+            bytes: &[ seed ],
+            current: core::cell::UnsafeCell::new(0),
         };
 
-        let secret = match SecretKeyBase::from_pkcs8(pkcs8.as_ref()) {
-            Ok(secret) => secret,
-            Err(_) => {
-                warn!("Invalid secret key base");
-                return (PublicKey([0; ED25519_PUBLIC_KEY_LEN].into()), SecretKey(vec![]));
-            }
-        };
+        let pkcs8 = SecretKeyBase::generate_pkcs8(&rand)
+            .expect("Failed to generate secret key base for pkcs8");
 
-        let pub_key_gen = match secret.public_key().as_ref().try_into() {
-            Ok(pub_key_gen) => pub_key_gen,
-            Err(_) => {
-                warn!("Invalid public key generation");
-                return (PublicKey([0; ED25519_PUBLIC_KEY_LEN].into()), SecretKey(vec![]));
-            }
-        };
-        let public = PublicKey(pub_key_gen);
-        let secret = match SecretKey::from_slice(pkcs8.as_ref()) {
-            Some(secret) => secret,
-            None => {
-                warn!("Invalid secret key");
-                return (PublicKey([0; ED25519_PUBLIC_KEY_LEN].into()), SecretKey(vec![]));
-            }
-        };
+        let keypair = SecretKeyBase::from_pkcs8(pkcs8.as_ref())
+            .expect("Generated PKCS8 document is invalid?!?");
 
-        (public, secret)
+        let public_key = PublicKey(keypair.public_key().as_ref().try_into()
+            .expect("Generated keypair contains an invalid public key?!?"));
+        let secret_key = pkcs8.into();
+        (public_key, secret_key)
     }
 }
 
@@ -210,11 +217,11 @@ pub mod secretbox_chacha20_poly1305 {
     }
 
     pub fn gen_key() -> Key {
-        Key(generate_random())
+        Key(generate_random().into())
     }
 
     pub fn gen_nonce() -> Nonce {
-        Nonce(generate_random())
+        Nonce(generate_random().into())
     }
 }
 
@@ -243,12 +250,12 @@ pub mod pbkdf2 {
     }
 
     pub fn gen_salt() -> Salt {
-        Salt(generate_random())
+        Salt(generate_random().into())
     }
 }
 
 pub mod sha3_256 {
-    use std::convert::{TryFrom, TryInto};
+    use std::convert::TryInto;
     use std::fmt::{Display, Formatter};
     use std::ops::Deref;
     use std::str::FromStr;
@@ -314,7 +321,7 @@ pub mod sha3_256 {
     }
 }
 
-fn generate_random<const N: usize>() -> FixedByteArray<N> {
+fn generate_random<const N: usize>() -> [u8; N] {
     let mut value: [u8; N] = [0; N];
 
     use ring::rand::SecureRandom;
@@ -324,5 +331,5 @@ fn generate_random<const N: usize>() -> FixedByteArray<N> {
         Err(_) => warn!("Failed to generate random bytes"),
     };
 
-    FixedByteArray::new(value)
+    value
 }
