@@ -1,5 +1,4 @@
 pub use ring;
-use tracing::warn;
 
 macro_rules! fixed_bytes_wrapper {
     ($vis:vis struct $name:ident, $n:expr, $doc:literal) => {
@@ -92,11 +91,10 @@ pub mod sign_ed25519 {
             PublicKey::from_slice(keypair.public_key().as_ref())
                 .expect("Keypair public key length is invalid?!?")
         }
-    }
 
-    impl From<ring::pkcs8::Document> for SecretKey {
-        fn from(value: ring::pkcs8::Document) -> Self {
-            Self(value.as_ref().to_vec())
+        /// Gets a reference to the PKCS8 document which describes this secret key.
+        pub fn get_pkcs8(&self) -> &[u8] {
+            &self.0
         }
     }
 
@@ -118,19 +116,13 @@ pub mod sign_ed25519 {
         }
     }
 
-    impl AsRef<[u8]> for SecretKey {
-        fn as_ref(&self) -> &[u8] {
-            self.0.as_ref()
-        }
-    }
-
     pub fn verify_detached(sig: &Signature, msg: &[u8], pk: &PublicKey) -> bool {
         let upk = UnparsedPublicKey::new(&ED25519, pk);
         upk.verify(msg, sig.as_ref()).is_ok()
     }
 
     pub fn sign_detached(msg: &[u8], sk: &SecretKey) -> Signature {
-        let keypair = SecretKeyBase::from_pkcs8(sk.as_ref())
+        let keypair = SecretKeyBase::from_pkcs8(sk.get_pkcs8())
             .expect("Invalid PKCS8 secret key?!?");
 
         let signature = keypair.sign(msg).as_ref().try_into()
@@ -163,7 +155,7 @@ pub mod sign_ed25519 {
 
         let public_key = PublicKey(keypair.public_key().as_ref().try_into()
             .expect("Generated keypair contains an invalid public key?!?"));
-        let secret_key = pkcs8.into();
+        let secret_key = SecretKey(pkcs8.as_ref().to_vec());
         (public_key, secret_key)
     }
 }
@@ -397,7 +389,7 @@ mod test {
 
     #[test]
     fn test_ed25519_secret_key() {
-        assert_eq!(hex::encode(sign_ed25519::SecretKey::placeholder_seed([])),
+        assert_eq!(hex::encode(sign_ed25519::SecretKey::placeholder_seed([]).get_pkcs8()),
                    "3053020101300506032b6570042204203651dccde39be8697d8e0690acd90e3b8ce7f596c5f205fbd0b3b3e3a68629e1a12303210092bc778f74110b3fcbcf8a4df71ed9a33c62faa8d01417d381745ef700ef6b73");
 
         test_placeholders_different_seed::<sign_ed25519::SecretKey>();
