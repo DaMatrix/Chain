@@ -159,7 +159,7 @@ impl<'de> Deserialize<'de> for TxHash {
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct OutPoint {
     pub t_hash: String,
-    pub n: i32,
+    pub n: u32,
 }
 
 impl fmt::Display for OutPoint {
@@ -170,7 +170,7 @@ impl fmt::Display for OutPoint {
 
 impl OutPoint {
     /// Creates a new outpoint instance
-    pub fn new(t_hash: String, n: i32) -> OutPoint {
+    pub fn new(t_hash: String, n: u32) -> OutPoint {
         OutPoint { t_hash, n }
     }
 }

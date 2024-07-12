@@ -7,6 +7,7 @@ use crate::primitives::transaction::*;
 use crate::script::lang::Script;
 use crate::script::{OpCodes, StackEntry};
 use std::collections::BTreeMap;
+use std::convert::TryInto;
 use tracing::debug;
 
 pub struct ReceiverInfo {
@@ -256,7 +257,7 @@ pub fn get_tx_with_out_point<'a>(
 ) -> impl Iterator<Item = (OutPoint, &'a Transaction)> {
     txs.map(|(hash, tx)| (hash, tx, &tx.outputs))
         .flat_map(|(hash, tx, outs)| outs.iter().enumerate().map(move |(idx, _)| (hash, idx, tx)))
-        .map(|(hash, idx, tx)| (OutPoint::new(hash.clone(), idx as i32), tx))
+        .map(|(hash, idx, tx)| (OutPoint::new(hash.clone(), idx.try_into().unwrap()), tx))
 }
 
 /// Get all the OutPoint and Transaction from the (hash,transactions)
@@ -280,7 +281,7 @@ pub fn get_tx_out_with_out_point<'a>(
 ) -> impl Iterator<Item = (OutPoint, &'a TxOut)> {
     txs.map(|(hash, tx)| (hash, tx.outputs.iter()))
         .flat_map(|(hash, outs)| outs.enumerate().map(move |(idx, txo)| (hash, idx, txo)))
-        .map(|(hash, idx, txo)| (OutPoint::new(hash.clone(), idx as i32), txo))
+        .map(|(hash, idx, txo)| (OutPoint::new(hash.clone(), idx.try_into().unwrap()), txo))
 }
 
 /// Get all fee outputs from the (hash,transactions)
@@ -293,7 +294,7 @@ pub fn get_fees_with_out_point<'a>(
 ) -> impl Iterator<Item = (OutPoint, &'a TxOut)> {
     txs.map(|(hash, tx)| (hash, tx.fees.iter()))
         .flat_map(|(hash, outs)| outs.enumerate().map(move |(idx, txo)| (hash, idx, txo)))
-        .map(|(hash, idx, txo)| (OutPoint::new(hash.clone(), idx as i32), txo))
+        .map(|(hash, idx, txo)| (OutPoint::new(hash.clone(), idx.try_into().unwrap()), txo))
 }
 
 /// Get all fee outputs from the (hash,transactions)
@@ -306,7 +307,7 @@ pub fn get_fees_with_out_point_cloned<'a>(
 ) -> impl Iterator<Item = (OutPoint, TxOut)> + 'a {
     txs.map(|(hash, tx)| (hash, tx.fees.iter()))
         .flat_map(|(hash, outs)| outs.enumerate().map(move |(idx, txo)| (hash, idx, txo)))
-        .map(|(hash, idx, txo)| (OutPoint::new(hash.clone(), idx as i32), txo.clone()))
+        .map(|(hash, idx, txo)| (OutPoint::new(hash.clone(), idx.try_into().unwrap()), txo.clone()))
 }
 
 /// Get all the OutPoint and TxOut from the (hash,transactions)
