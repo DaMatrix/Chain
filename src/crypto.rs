@@ -310,14 +310,35 @@ pub mod sha3_256 {
         }
     }
 
+    /// Computes the SHA3-256 hash of the given bytes.
+    ///
+    /// ### Arguments
+    ///
+    /// * `data`  - the bytes to hash
     pub fn digest(data: &[u8]) -> Hash {
         Hash(Sha3_256::digest(data).try_into().unwrap())
     }
 
-    pub fn digest_all<'a>(data: impl Iterator<Item = &'a [u8]>) -> Hash {
+    /// Concatenates all the given byte slices and computes the SHA3-256 hash of the result.
+    ///
+    /// ### Arguments
+    ///
+    /// * `data_parts`  - the byte slices to concatenate and hash
+    pub fn digest_all<'a>(data_parts: impl IntoIterator<Item = &'a [u8]>) -> Hash {
         let mut hasher = Sha3_256::new();
-        data.for_each(|v| hasher.update(v));
+        data_parts.into_iter().for_each(|v| hasher.update(v));
         Hash(hasher.finalize().try_into().unwrap())
+    }
+
+    /// Serializes the given value using bincode-serde and computes the SHA3-256 hash of the result.
+    ///
+    /// ### Arguments
+    ///
+    /// * `value`  - the value to serialize and hash
+    pub fn digest_serialize<S: serde::Serialize>(value: &S) -> bincode::Result<Hash> {
+        let mut hasher = Sha3_256::new();
+        bincode::serialize_into(&mut hasher, value)?;
+        Ok(Hash(hasher.finalize().try_into().unwrap()))
     }
 }
 
@@ -410,5 +431,27 @@ mod test {
         test_fixed_bytes_wrapper::<pbkdf2::Salt>(
             "81c4a8cde605d6b51857eb6ebaead0de98cf254d4855725db7aec45a98699e9c",
         );
+    }
+
+    #[test]
+    fn test_sha3_256_digest_serialize() {
+        // ensure that sha3_256::digest_serialize gives the same result as serializing the full
+        // object into a buffer and then hashing that
+        macro_rules! test_case {
+            ($t:ty: $($n:literal)*) => {
+                $(
+                    let arr : [$t; $n] = std::array::from_fn(|n| n as $t);
+                    assert_eq!(sha3_256::digest(&bincode::serialize(&arr).unwrap()),
+                               sha3_256::digest_serialize(&arr).unwrap(),
+                               concat!("[", stringify!($t), "; {}]"), $n);
+                )*
+            };
+        }
+
+        test_case!(u64:
+            00 01 02 03 04 05 06 07 08 09
+            10 11 12 13 14 15 16 17 18 19
+            20 21 22 23 24 25 26 27 28 29
+            30 31 32);
     }
 }
