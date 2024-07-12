@@ -333,3 +333,82 @@ fn generate_random<const N: usize>() -> [u8; N] {
 
     value
 }
+
+#[cfg(test)]
+mod test {
+    use std::fmt::{Debug, Display};
+    use std::str::FromStr;
+    use serde::Serialize;
+    use serde::de::DeserializeOwned;
+    use crate::utils::PlaceholderSeed;
+    use super::*;
+
+    fn test_placeholders_different_seed<W: Eq + Debug + PlaceholderSeed>() {
+        let [v0, v1] = W::placeholder_array_seed::<2>([]);
+        assert_eq!(v0, v0);
+        assert_eq!(v1, v1);
+        assert_ne!(v0, v1);
+    }
+
+    fn test_fixed_bytes_wrapper<W: Eq + Debug + Display + FromStr<Err = hex::FromHexError> + PlaceholderSeed + Serialize + DeserializeOwned>(
+        expected_placeholder_hex: &str,
+    ) {
+        let placeholder = W::placeholder_seed([]);
+        assert_eq!(placeholder.to_string(), expected_placeholder_hex);
+        assert_eq!(W::from_str(expected_placeholder_hex).unwrap(), placeholder);
+
+        let expected_json = format!("\"{}\"", expected_placeholder_hex);
+        assert_eq!(serde_json::to_string(&placeholder).unwrap(), expected_json);
+        assert_eq!(serde_json::from_str::<W>(&expected_json).unwrap(), placeholder);
+
+        test_placeholders_different_seed::<W>();
+    }
+
+    #[test]
+    fn test_ed25519_signature() {
+        test_fixed_bytes_wrapper::<sign_ed25519::Signature>(
+            "9c4e2259fc9b47b4c4cf672c7436dc16ace2970955a002b69a495ca96d9dfaf026dbee622284a1cf306a1189af8a462d2ea498d10f14b637c848168b0ba698a7",
+        );
+    }
+
+    #[test]
+    fn test_ed25519_public_key() {
+        test_fixed_bytes_wrapper::<sign_ed25519::PublicKey>(
+            "1d67f7de4c59192568f8e0381fcd1eb9ce044568e4670038e0b42e421540b4f6",
+        );
+    }
+
+    #[test]
+    fn test_ed25519_secret_key() {
+        assert_eq!(hex::encode(sign_ed25519::SecretKey::placeholder_seed([])),
+                   "3053020101300506032b6570042204203651dccde39be8697d8e0690acd90e3b8ce7f596c5f205fbd0b3b3e3a68629e1a12303210092bc778f74110b3fcbcf8a4df71ed9a33c62faa8d01417d381745ef700ef6b73");
+
+        test_placeholders_different_seed::<sign_ed25519::SecretKey>();
+    }
+
+    #[test]
+    fn test_ed25519_keypair() {
+        test_placeholders_different_seed::<(sign_ed25519::PublicKey, sign_ed25519::SecretKey)>();
+    }
+
+    #[test]
+    fn test_chacha20_key() {
+        test_fixed_bytes_wrapper::<secretbox_chacha20_poly1305::Key>(
+            "d2678ac6abff79fa16d2a8f762a3c33b227a519ac1830aee33a19605b7f9cd35",
+        );
+    }
+
+    #[test]
+    fn test_chacha20_nonce() {
+        test_fixed_bytes_wrapper::<secretbox_chacha20_poly1305::Nonce>(
+            "b0980a0a073d6b828fb48ad5",
+        );
+    }
+
+    #[test]
+    fn test_pbkdf2_salt() {
+        test_fixed_bytes_wrapper::<pbkdf2::Salt>(
+            "81c4a8cde605d6b51857eb6ebaead0de98cf254d4855725db7aec45a98699e9c",
+        );
+    }
+}
