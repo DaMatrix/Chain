@@ -181,6 +181,18 @@ impl Default for OutPoint {
     }
 }
 
+#[cfg(test)]
+impl crate::utils::PlaceholderSeed for OutPoint {
+    fn placeholder_seed_parts<'a>(seed_parts: impl IntoIterator<Item=&'a [u8]>) -> Self {
+        Self {
+            t_hash: TxHash::placeholder_seed_parts(
+                ["OutPoint:".as_bytes()].iter().copied().chain(seed_parts)
+            ).to_string(),
+            n: 0,
+        }
+    }
+}
+
 /// An input of a transaction. It contains the location of the previous
 /// transaction's output that it claims and a signature that matches the
 /// output's public key.
