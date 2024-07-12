@@ -170,14 +170,14 @@ impl fmt::Display for OutPoint {
 
 impl OutPoint {
     /// Creates a new outpoint instance
+    // TODO: jrabil: remove this
     pub fn new(t_hash: String, n: u32) -> OutPoint {
         OutPoint { t_hash, n }
     }
-}
 
-impl Default for OutPoint {
-    fn default() -> Self {
-        Self::new(String::new(), 0)
+    /// Creates a new outpoint instance
+    pub fn new_hash(t_hash: TxHash, n: u32) -> OutPoint {
+        OutPoint { t_hash: t_hash.to_string(), n }
     }
 }
 
