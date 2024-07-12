@@ -735,6 +735,7 @@ mod tests {
     use crate::crypto::sign_ed25519::{self as sign, Signature};
     use crate::primitives::asset::{AssetValues, ItemAsset, TokenAmount};
     use crate::script::OpCodes;
+    use crate::utils::{Placeholder, PlaceholderSeed};
     use crate::utils::script_utils::{tx_has_valid_p2sh_script, tx_outs_are_valid};
 
     #[test]
@@ -758,11 +759,11 @@ mod tests {
     fn test_construct_valid_inputs(address_version: Option<u64>) -> (Vec<TxIn>, String, BTreeMap<OutPoint, (PublicKey, SecretKey)>) {
         let (_pk, sk) = sign::gen_keypair();
         let (pk, _sk) = sign::gen_keypair();
-        let t_hash = vec![0, 0, 0];
-        let signature = sign::sign_detached(&t_hash, &sk);
+        let t_hash = TxHash::placeholder();
+        let signature = sign::sign_detached(t_hash.to_string().as_bytes(), &sk);
         let drs_block_hash = hex::encode(vec![1, 2, 3, 4, 5, 6]);
         let mut key_material = BTreeMap::new();
-        let prev_out = OutPoint::new(hex::encode(t_hash), 0);
+        let prev_out = OutPoint::new_hash(t_hash, 0);
 
         key_material.insert(prev_out.clone(), (pk, sk));
 
@@ -914,11 +915,11 @@ mod tests {
     fn test_token_onspend_with_fees() {
         let (_pk, sk) = sign::gen_keypair();
         let (pk, _sk) = sign::gen_keypair();
-        let t_hash = vec![0, 0, 0];
-        let signature = sign::sign_detached(&t_hash, &sk);
+        let t_hash = TxHash::placeholder();
+        let signature = sign::sign_detached(t_hash.to_string().as_bytes(), &sk);
         let tokens = TokenAmount(400000);
         let fees = TokenAmount(1000);
-        let prev_out = OutPoint::new(hex::encode(t_hash), 0);
+        let prev_out = OutPoint::new_hash(t_hash, 0);
         let mut key_material = BTreeMap::new();
         key_material.insert(prev_out.clone(), (pk, sk));
 
@@ -958,10 +959,10 @@ mod tests {
     fn test_item_onspend_with_fees() {
         let (_pk, sk) = sign::gen_keypair();
         let (pk, _sk) = sign::gen_keypair();
-        let t_hash = vec![0, 0, 0];
-        let signature = sign::sign_detached(&t_hash, &sk);
+        let t_hash = TxHash::placeholder();
+        let signature = sign::sign_detached(t_hash.to_string().as_bytes(), &sk);
         let fees = TokenAmount(1000);
-        let prev_out = OutPoint::new(hex::encode(t_hash), 0);
+        let prev_out = OutPoint::new_hash(t_hash, 0);
         let mut key_material = BTreeMap::new();
         key_material.insert(prev_out.clone(), (pk, sk));
 
@@ -1006,9 +1007,9 @@ mod tests {
     fn test_item_onspend_metadata() {
         let (_pk, sk) = sign::gen_keypair();
         let (pk, _sk) = sign::gen_keypair();
-        let t_hash = vec![0, 0, 0];
-        let signature = sign::sign_detached(&t_hash, &sk);
-        let prev_out = OutPoint::new(hex::encode(t_hash), 0);
+        let t_hash = TxHash::placeholder();
+        let signature = sign::sign_detached(t_hash.to_string().as_bytes(), &sk);
+        let prev_out = OutPoint::new_hash(t_hash, 0);
         let mut key_material = BTreeMap::new();
         key_material.insert(prev_out.clone(), (pk, sk));
 
@@ -1067,16 +1068,15 @@ mod tests {
     fn test_construct_valid_utxo_set_common(address_version: Option<u64>) {
         let (pk, sk) = sign::gen_keypair();
 
-        let t_hash_1 = hex::encode(vec![0, 0, 0]);
-        let signed = sign::sign_detached(t_hash_1.as_bytes(), &sk);
+        let t_hash_1 = TxHash::placeholder();
+        let signed = sign::sign_detached(t_hash_1.to_string().as_bytes(), &sk);
 
-        let prev_out = OutPoint::new(hex::encode(t_hash_1), 0);
+        let prev_out = OutPoint::new_hash(t_hash_1, 0);
         let mut key_material = BTreeMap::new();
         key_material.insert(prev_out.clone(), (pk, sk.clone()));
 
-
         let tx_1 = TxConstructor {
-            previous_out: OutPoint::new("".to_string(), 0),
+            previous_out: Placeholder::placeholder(),
             signatures: vec![signed],
             pub_keys: vec![pk],
             address_version,
@@ -1149,9 +1149,9 @@ mod tests {
     fn test_construct_a_valid_dde_tx_common(address_version: Option<u64>) {
         let (_pk, sk) = sign::gen_keypair();
         let (pk, _sk) = sign::gen_keypair();
-        let t_hash = hex::encode(vec![0, 0, 0]);
-        let signature = sign::sign_detached(t_hash.as_bytes(), &sk);
-        let prev_out = OutPoint::new(hex::encode(&t_hash), 0);
+        let t_hash = TxHash::placeholder();
+        let signature = sign::sign_detached(t_hash.to_string().as_bytes(), &sk);
+        let prev_out = OutPoint::new_hash(t_hash, 0);
         let mut key_material = BTreeMap::new();
         key_material.insert(prev_out.clone(), (pk, sk));
 
@@ -1232,7 +1232,7 @@ mod tests {
                 // constructors with enough money for amount and excess, caller responsibility.
                 construct_payment_tx_ins(vec![])
             };
-            key_material.insert(OutPoint::new("".to_string(), 0), (pk, sk));
+            key_material.insert(Placeholder::placeholder(), (pk, sk));
 
             let excess_tx_out =
                 TxOut::new_token_amount(sender_address_excess, amount - payment, None);
@@ -1378,11 +1378,7 @@ mod tests {
         //
         // Arrange
         //
-        let out_points = vec![
-            OutPoint::new("000000".to_owned(), 0),
-            OutPoint::new("000001".to_owned(), 0),
-            OutPoint::new("000002".to_owned(), 0),
-        ];
+        let out_points = OutPoint::placeholder_array_seed::<3>([]);
 
         //
         // Act
@@ -1392,11 +1388,11 @@ mod tests {
             .map(construct_tx_in_signable_hash)
             .collect();
 
-        let expected: Vec<String> = vec![
-            "927b3411743452e5e0d73e9e40a4fa3c842b3d00dabde7f9af7e44661ce02c88".to_owned(),
-            "754dc248d1c847e8a10c6f8ded6ccad96381551ebb162583aea2a86b9bb78dfa".to_owned(),
-            "5585c6f74d5c55f1ab457c31671822ba28c78c397cce1e11680b9f3852f96edb".to_owned(),
-        ];
+        let expected = [
+            "4d870234ef2e150ea3fe9c224d22518704b606f36b4ad6a03ce9a02261653306",
+            "77154c93c57ed5873ac19ee17429f7ab855703cada2316b8962c0948861bd3db",
+            "56a6380584eddd03d0aa3f2b561ce37d53f0eef5c8a988738b1fe2ccfe6172ee",
+        ].map(String::from);
 
         //
         // Assert
@@ -1443,9 +1439,12 @@ mod tests {
             "efa9dcba0f3282b3ed4a6aa1ccdb169d6685a30d7b2af7a2171a5682f3112359",
         ];
 
-        let signatures = ["660e4698d817d409feb209699b15935048c8b3c4ac86a23f25b05aa32fb8b87e7cd029b83220d31a0b2717bd63b47a320a7728355d7fae43a665d6e27743e20d", 
-            "fd107c9446cdcbd8fbb0d6b88c73067c9bd15de03fff677b0129acf1bd2d14a5ab8a63c7eb6fe8c5acc4b44b033744760847194a15b006368d178c85243d0605", 
-            "e1a436bbfcb3e411be1ce6088cdb4c39d7e79f8fe427943e74307e43864fd0f6ef26123f1439b92c075edd031d17feb4dd265c6fcc2e5ed571df48a03c396100"];
+        // TODO: Don't hard-code these signatures???
+        let signatures = [
+            "660e4698d817d409feb209699b15935048c8b3c4ac86a23f25b05aa32fb8b87e7cd029b83220d31a0b2717bd63b47a320a7728355d7fae43a665d6e27743e20d",
+            "fd107c9446cdcbd8fbb0d6b88c73067c9bd15de03fff677b0129acf1bd2d14a5ab8a63c7eb6fe8c5acc4b44b033744760847194a15b006368d178c85243d0605",
+            "e1a436bbfcb3e411be1ce6088cdb4c39d7e79f8fe427943e74307e43864fd0f6ef26123f1439b92c075edd031d17feb4dd265c6fcc2e5ed571df48a03c396100",
+        ];
 
         let signable_data = [
             "927b3411743452e5e0d73e9e40a4fa3c842b3d00dabde7f9af7e44661ce02c88",
@@ -1453,11 +1452,7 @@ mod tests {
             "5585c6f74d5c55f1ab457c31671822ba28c78c397cce1e11680b9f3852f96edb",
         ];
 
-        let previous_out_points = vec![
-            OutPoint::new("000000".to_owned(), 0),
-            OutPoint::new("000001".to_owned(), 0),
-            OutPoint::new("000002".to_owned(), 0),
-        ];
+        let previous_out_points = OutPoint::placeholder_array_seed::<3>([]);
 
         //
         // Act
@@ -1477,7 +1472,7 @@ mod tests {
             .collect();
 
         let expected =
-            "c8b62d379f07602956207ea473ce20d9752d24ad6e6cd43cb042d024d7c6a468".to_owned();
+            "32ef3f04a4dd7236628bc9cb1a1d1c10458ac1b862ed9faba1cd883d15964070";
         let actual = construct_tx_ins_address(&tx_ins);
 
         //

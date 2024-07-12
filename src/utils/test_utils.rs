@@ -8,6 +8,8 @@ use crate::script::lang::Script;
 use crate::utils::transaction_utils::{construct_address, construct_tx_in_out_signable_hash};
 use std::collections::BTreeMap;
 use std::convert::TryInto;
+use crate::primitives::transaction::TxHash;
+use crate::utils::Placeholder;
 
 /// Generate a transaction with valid Script values
 /// and accompanying UTXO set for testing a set of
@@ -48,8 +50,9 @@ pub fn generate_tx_with_ins_and_outs_assets(
     }
 
     // Generate inputs
+    let tx_hash = TxHash::placeholder();
     for (input_amount, genesis_hash, md) in input_assets {
-        let tx_previous_out = OutPoint::new("tx_hash".to_owned(), tx.inputs.len().try_into().unwrap());
+        let tx_previous_out = OutPoint::new_hash(tx_hash.clone(), tx.inputs.len().try_into().unwrap());
         let tx_in_previous_out = match genesis_hash {
             Some(drs) => {
                 let item = Asset::item(*input_amount, Some(drs.to_string()), md.clone());

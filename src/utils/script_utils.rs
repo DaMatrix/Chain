@@ -302,6 +302,7 @@ mod tests {
     use crate::primitives::asset::Asset;
     use crate::primitives::druid::DdeValues;
     use crate::primitives::transaction::OutPoint;
+    use crate::utils::Placeholder;
     use crate::utils::test_utils::generate_tx_with_ins_and_outs_assets;
     use crate::utils::transaction_utils::*;
 
@@ -2727,11 +2728,11 @@ mod tests {
 
     fn test_pass_member_multisig_valid_common(address_version: Option<u64>) {
         let (pk, sk) = sign::gen_keypair();
-        let t_hash = hex::encode(vec![0, 0, 0]);
-        let signature = sign::sign_detached(t_hash.as_bytes(), &sk);
+        let t_hash = TxHash::placeholder();
+        let signature = sign::sign_detached(t_hash.to_string().as_bytes(), &sk);
 
         let tx_const = TxConstructor {
-            previous_out: OutPoint::new(t_hash, 0),
+            previous_out: OutPoint::new_hash(t_hash, 0),
             signatures: vec![signature],
             pub_keys: vec![pk],
             address_version,
@@ -2763,11 +2764,11 @@ mod tests {
     fn test_fail_member_multisig_invalid_common(address_version: Option<u64>) {
         let (_pk, sk) = sign::gen_keypair();
         let (pk, _sk) = sign::gen_keypair();
-        let t_hash = hex::encode(vec![0, 0, 0]);
-        let signature = sign::sign_detached(t_hash.as_bytes(), &sk);
+        let t_hash = TxHash::placeholder();
+        let signature = sign::sign_detached(t_hash.to_string().as_bytes(), &sk);
 
         let tx_const = TxConstructor {
-            previous_out: OutPoint::new(t_hash, 0),
+            previous_out: OutPoint::new_hash(t_hash, 0),
             signatures: vec![signature],
             pub_keys: vec![pk],
             address_version,
@@ -2786,10 +2787,7 @@ mod tests {
 
     fn test_pass_p2pkh_sig_valid_common(address_version: Option<u64>) {
         let (pk, sk) = sign::gen_keypair();
-        let outpoint = OutPoint {
-            t_hash: hex::encode(vec![0, 0, 0]),
-            n: 0,
-        };
+        let outpoint = OutPoint::placeholder();
         let mut key_material = BTreeMap::new();
         key_material.insert(outpoint.clone(), (pk, sk));
 
@@ -2829,10 +2827,7 @@ mod tests {
     fn test_fail_p2pkh_sig_invalid_common(address_version: Option<u64>) {
         let (pk, sk) = sign::gen_keypair();
         let (second_pk, _s) = sign::gen_keypair();
-        let outpoint = OutPoint {
-            t_hash: hex::encode(vec![0, 0, 0]),
-            n: 0,
-        };
+        let outpoint = Placeholder::placeholder();
 
         let hash_to_sign = construct_tx_in_signable_hash(&outpoint);
         let signature = sign::sign_detached(hash_to_sign.as_bytes(), &sk);
@@ -2874,10 +2869,7 @@ mod tests {
 
     fn test_fail_p2pkh_sig_script_empty_common(address_version: Option<u64>) {
         let (pk, sk) = sign::gen_keypair();
-        let outpoint = OutPoint {
-            t_hash: hex::encode(vec![0, 0, 0]),
-            n: 0,
-        };
+        let outpoint = Placeholder::placeholder();
 
         let hash_to_sign = construct_tx_in_signable_hash(&outpoint);
         let signature = sign::sign_detached(hash_to_sign.as_bytes(), &sk);
@@ -2928,10 +2920,7 @@ mod tests {
 
     fn test_fail_p2pkh_sig_script_invalid_struct_common(address_version: Option<u64>) {
         let (pk, sk) = sign::gen_keypair();
-        let outpoint = OutPoint {
-            t_hash: hex::encode(vec![0, 0, 0]),
-            n: 0,
-        };
+        let outpoint = Placeholder::placeholder();
 
         let hash_to_sign = construct_tx_in_signable_hash(&outpoint);
         let signature = sign::sign_detached(hash_to_sign.as_bytes(), &sk);
@@ -2988,14 +2977,14 @@ mod tests {
         let (first_pk, first_sk) = sign::gen_keypair();
         let (second_pk, second_sk) = sign::gen_keypair();
         let (third_pk, third_sk) = sign::gen_keypair();
-        let check_data = hex::encode(vec![0, 0, 0]);
+        let t_hash = TxHash::placeholder();
 
         let m = 2;
-        let first_sig = sign::sign_detached(check_data.as_bytes(), &first_sk);
-        let second_sig = sign::sign_detached(check_data.as_bytes(), &second_sk);
+        let first_sig = sign::sign_detached(t_hash.to_string().as_bytes(), &first_sk);
+        let second_sig = sign::sign_detached(t_hash.to_string().as_bytes(), &second_sk);
 
         let tx_const = TxConstructor {
-            previous_out: OutPoint::new(check_data, 0),
+            previous_out: OutPoint::new_hash(t_hash, 0),
             signatures: vec![first_sig, second_sig],
             pub_keys: vec![first_pk, second_pk, third_pk],
             address_version,
@@ -3059,8 +3048,8 @@ mod tests {
         // Arrange
         //
         let (pk, sk) = sign::gen_keypair();
-        let tx_hash = hex::encode(vec![0, 0, 0]);
-        let tx_outpoint = OutPoint::new(tx_hash, 0);
+        let tx_hash = Placeholder::placeholder();
+        let tx_outpoint = OutPoint::new_hash(tx_hash, 0);
         let script_public_key = construct_address_for(&pk, address_version);
         let tx_in_previous_out =
             TxOut::new_token_amount(script_public_key.clone(), TokenAmount(5), locktime);
@@ -3300,11 +3289,11 @@ mod tests {
     fn test_fail_interpret_valid_common(address_version: Option<u64>) {
         let (_pk, sk) = sign::gen_keypair();
         let (pk, _sk) = sign::gen_keypair();
-        let t_hash = hex::encode(vec![0, 0, 0]);
-        let signature = sign::sign_detached(t_hash.as_bytes(), &sk);
+        let t_hash = TxHash::placeholder();
+        let signature = sign::sign_detached(t_hash.to_string().as_bytes(), &sk);
 
         let tx_const = TxConstructor {
-            previous_out: OutPoint::new(t_hash, 0),
+            previous_out: OutPoint::new_hash(t_hash, 0),
             signatures: vec![signature],
             pub_keys: vec![pk],
             address_version,
@@ -3335,11 +3324,11 @@ mod tests {
 
     fn test_pass_interpret_valid_common(address_version: Option<u64>) {
         let (pk, sk) = sign::gen_keypair();
-        let t_hash = hex::encode(vec![0, 0, 0]);
-        let signature = sign::sign_detached(t_hash.as_bytes(), &sk);
+        let t_hash = TxHash::placeholder();
+        let signature = sign::sign_detached(t_hash.to_string().as_bytes(), &sk);
 
         let tx_const = TxConstructor {
-            previous_out: OutPoint::new(t_hash, 0),
+            previous_out: OutPoint::new_hash(t_hash, 0),
             signatures: vec![signature],
             pub_keys: vec![pk],
             address_version,
