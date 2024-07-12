@@ -340,15 +340,9 @@ pub fn update_utxo_set(current_utxo: &mut BTreeMap<OutPoint, Transaction>) {
 /// ### Arguments
 ///
 /// * `tx`  - Transaction to hash
-pub fn construct_tx_hash(tx: &Transaction) -> String {
-    let bytes = match bincode::serde::encode_to_vec(tx, bincode::config::legacy()) {
-        Ok(bytes) => bytes,
-        Err(_) => vec![],
-    };
-    let mut hash = hex::encode(sha3_256::digest(&bytes));
-    hash.insert(ZERO, TX_PREPEND as char);
-    hash.truncate(TX_HASH_LENGTH);
-    hash
+pub fn construct_tx_hash(tx: &Transaction) -> TxHash {
+    let bytes = bincode::serde::encode_to_vec(tx, bincode::config::legacy()).unwrap();
+    TxHash::from_hash(sha3_256::digest(&bytes))
 }
 
 /// Constructs a valid TxIn for a new create asset transaction
@@ -791,7 +785,7 @@ mod tests {
         let spending_tx_hash = construct_tx_hash(&p2sh_tx);
 
         let tx_const = TxConstructor {
-            previous_out: OutPoint::new(spending_tx_hash, 0),
+            previous_out: OutPoint::new_hash(spending_tx_hash, 0),
             signatures: vec![],
             pub_keys: vec![],
             address_version: Some(NETWORK_VERSION_V0),
@@ -831,7 +825,7 @@ mod tests {
         let spending_tx_hash = construct_tx_hash(&burn_tx);
 
         let tx_const = TxConstructor {
-            previous_out: OutPoint::new(spending_tx_hash, 0),
+            previous_out: OutPoint::new_hash(spending_tx_hash, 0),
             signatures: vec![],
             pub_keys: vec![],
             address_version: Some(NETWORK_VERSION_V0),
@@ -1095,7 +1089,7 @@ mod tests {
             &key_material
         );
         let tx_1_hash = construct_tx_hash(&payment_tx_1);
-        let tx_1_out_p = OutPoint::new(tx_1_hash.clone(), 0);
+        let tx_1_out_p = OutPoint::new_hash(tx_1_hash.clone(), 0);
         key_material.insert(tx_1_out_p.clone(), (pk, sk));
 
         // Second tx referencing first
@@ -1114,7 +1108,7 @@ mod tests {
         let payment_tx_2 = construct_tx_core(tx_ins_2, tx_outs, None);
 
         let tx_2_hash = construct_tx_hash(&payment_tx_2);
-        let tx_2_out_p = OutPoint::new(tx_2_hash, 0);
+        let tx_2_out_p = OutPoint::new_hash(tx_2_hash, 0);
 
         // BTreemap
         let mut btree = BTreeMap::new();
