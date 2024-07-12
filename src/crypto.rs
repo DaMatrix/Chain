@@ -52,7 +52,7 @@ pub mod sign_ed25519 {
     pub use ring::signature::{ED25519, ED25519_PUBLIC_KEY_LEN};
     use serde::{Deserialize, Serialize};
     use std::convert::TryInto;
-    use crate::crypto::generate_random;
+    use crate::crypto::generate_secure_random;
 
     // Constants copied from the ring library
     const SCALAR_LEN: usize = 32;
@@ -131,7 +131,7 @@ pub mod sign_ed25519 {
 
     pub fn sign_detached(msg: &[u8], sk: &SecretKey) -> Signature {
         let keypair = SecretKeyBase::from_pkcs8(sk.as_ref())
-                .expect("Invalid PKCS8 secret key?!?");
+            .expect("Invalid PKCS8 secret key?!?");
 
         let signature = keypair.sign(msg).as_ref().try_into()
             .expect("Invalid signature?!?");
@@ -140,7 +140,7 @@ pub mod sign_ed25519 {
 
     /// Generates a completely random Ed25519 keypair.
     pub fn gen_keypair() -> (PublicKey, SecretKey) {
-        let seed = generate_random();
+        let seed = generate_secure_random();
         gen_keypair_from_seed(&seed)
     }
 
@@ -170,7 +170,7 @@ pub mod sign_ed25519 {
 
 pub mod secretbox_chacha20_poly1305 {
     // Use key and nonce separately like rust-tls does
-    use super::generate_random;
+    use super::generate_secure_random;
     pub use ring::aead::LessSafeKey as KeyBase;
     pub use ring::aead::Nonce as NonceBase;
     pub use ring::aead::NONCE_LEN;
@@ -217,16 +217,16 @@ pub mod secretbox_chacha20_poly1305 {
     }
 
     pub fn gen_key() -> Key {
-        Key(generate_random().into())
+        Key(generate_secure_random().into())
     }
 
     pub fn gen_nonce() -> Nonce {
-        Nonce(generate_random().into())
+        Nonce(generate_secure_random().into())
     }
 }
 
 pub mod pbkdf2 {
-    use super::generate_random;
+    use super::generate_secure_random;
     use ring::pbkdf2::{derive, PBKDF2_HMAC_SHA256};
     use serde::{Deserialize, Serialize};
     use std::convert::TryInto;
@@ -250,7 +250,7 @@ pub mod pbkdf2 {
     }
 
     pub fn gen_salt() -> Salt {
-        Salt(generate_random().into())
+        Salt(generate_secure_random().into())
     }
 }
 
@@ -342,16 +342,12 @@ pub mod sha3_256 {
     }
 }
 
-fn generate_random<const N: usize>() -> [u8; N] {
-    let mut value: [u8; N] = [0; N];
-
+fn generate_secure_random<const N: usize>() -> [u8; N] {
     use ring::rand::SecureRandom;
     let rand = ring::rand::SystemRandom::new();
-    match rand.fill(&mut value) {
-        Ok(_) => (),
-        Err(_) => warn!("Failed to generate random bytes"),
-    };
 
+    let mut value = [0u8; N];
+    rand.fill(&mut value).expect("Failed to generate random bytes");
     value
 }
 
