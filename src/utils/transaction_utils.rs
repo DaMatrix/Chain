@@ -257,7 +257,7 @@ pub fn get_tx_with_out_point<'a>(
 ) -> impl Iterator<Item = (OutPoint, &'a Transaction)> {
     txs.map(|(hash, tx)| (hash, tx, &tx.outputs))
         .flat_map(|(hash, tx, outs)| outs.iter().enumerate().map(move |(idx, _)| (hash, idx, tx)))
-        .map(|(hash, idx, tx)| (OutPoint::new(hash.clone(), idx.try_into().unwrap()), tx))
+        .map(|(hash, idx, tx)| (OutPoint::new(hash.parse().expect(hash.as_str()), idx.try_into().unwrap()), tx))
 }
 
 /// Get all the OutPoint and Transaction from the (hash,transactions)
@@ -281,7 +281,7 @@ pub fn get_tx_out_with_out_point<'a>(
 ) -> impl Iterator<Item = (OutPoint, &'a TxOut)> {
     txs.map(|(hash, tx)| (hash, tx.outputs.iter()))
         .flat_map(|(hash, outs)| outs.enumerate().map(move |(idx, txo)| (hash, idx, txo)))
-        .map(|(hash, idx, txo)| (OutPoint::new(hash.clone(), idx.try_into().unwrap()), txo))
+        .map(|(hash, idx, txo)| (OutPoint::new(hash.parse().expect(hash.as_str()), idx.try_into().unwrap()), txo))
 }
 
 /// Get all fee outputs from the (hash,transactions)
@@ -294,7 +294,7 @@ pub fn get_fees_with_out_point<'a>(
 ) -> impl Iterator<Item = (OutPoint, &'a TxOut)> {
     txs.map(|(hash, tx)| (hash, tx.fees.iter()))
         .flat_map(|(hash, outs)| outs.enumerate().map(move |(idx, txo)| (hash, idx, txo)))
-        .map(|(hash, idx, txo)| (OutPoint::new(hash.clone(), idx.try_into().unwrap()), txo))
+        .map(|(hash, idx, txo)| (OutPoint::new(hash.parse().expect(hash.as_str()), idx.try_into().unwrap()), txo))
 }
 
 /// Get all fee outputs from the (hash,transactions)
@@ -307,7 +307,7 @@ pub fn get_fees_with_out_point_cloned<'a>(
 ) -> impl Iterator<Item = (OutPoint, TxOut)> + 'a {
     txs.map(|(hash, tx)| (hash, tx.fees.iter()))
         .flat_map(|(hash, outs)| outs.enumerate().map(move |(idx, txo)| (hash, idx, txo)))
-        .map(|(hash, idx, txo)| (OutPoint::new(hash.clone(), idx.try_into().unwrap()), txo.clone()))
+        .map(|(hash, idx, txo)| (OutPoint::new(hash.parse().expect(hash.as_str()), idx.try_into().unwrap()), txo.clone()))
 }
 
 /// Get all the OutPoint and TxOut from the (hash,transactions)
@@ -757,7 +757,7 @@ mod tests {
         let signature = sign::sign_detached(t_hash.to_string().as_bytes(), &sk);
         let drs_block_hash = hex::encode(vec![1, 2, 3, 4, 5, 6]);
         let mut key_material = BTreeMap::new();
-        let prev_out = OutPoint::new_hash(t_hash, 0);
+        let prev_out = OutPoint::new(t_hash, 0);
 
         key_material.insert(prev_out.clone(), (pk, sk));
 
@@ -785,7 +785,7 @@ mod tests {
         let spending_tx_hash = construct_tx_hash(&p2sh_tx);
 
         let tx_const = TxConstructor {
-            previous_out: OutPoint::new_hash(spending_tx_hash, 0),
+            previous_out: OutPoint::new(spending_tx_hash, 0),
             signatures: vec![],
             pub_keys: vec![],
             address_version: Some(NETWORK_VERSION_V0),
@@ -825,7 +825,7 @@ mod tests {
         let spending_tx_hash = construct_tx_hash(&burn_tx);
 
         let tx_const = TxConstructor {
-            previous_out: OutPoint::new_hash(spending_tx_hash, 0),
+            previous_out: OutPoint::new(spending_tx_hash, 0),
             signatures: vec![],
             pub_keys: vec![],
             address_version: Some(NETWORK_VERSION_V0),
@@ -913,7 +913,7 @@ mod tests {
         let signature = sign::sign_detached(t_hash.to_string().as_bytes(), &sk);
         let tokens = TokenAmount(400000);
         let fees = TokenAmount(1000);
-        let prev_out = OutPoint::new_hash(t_hash, 0);
+        let prev_out = OutPoint::new(t_hash, 0);
         let mut key_material = BTreeMap::new();
         key_material.insert(prev_out.clone(), (pk, sk));
 
@@ -956,7 +956,7 @@ mod tests {
         let t_hash = TxHash::placeholder();
         let signature = sign::sign_detached(t_hash.to_string().as_bytes(), &sk);
         let fees = TokenAmount(1000);
-        let prev_out = OutPoint::new_hash(t_hash, 0);
+        let prev_out = OutPoint::new(t_hash, 0);
         let mut key_material = BTreeMap::new();
         key_material.insert(prev_out.clone(), (pk, sk));
 
@@ -1003,7 +1003,7 @@ mod tests {
         let (pk, _sk) = sign::gen_keypair();
         let t_hash = TxHash::placeholder();
         let signature = sign::sign_detached(t_hash.to_string().as_bytes(), &sk);
-        let prev_out = OutPoint::new_hash(t_hash, 0);
+        let prev_out = OutPoint::new(t_hash, 0);
         let mut key_material = BTreeMap::new();
         key_material.insert(prev_out.clone(), (pk, sk));
 
@@ -1065,7 +1065,7 @@ mod tests {
         let t_hash_1 = TxHash::placeholder();
         let signed = sign::sign_detached(t_hash_1.to_string().as_bytes(), &sk);
 
-        let prev_out = OutPoint::new_hash(t_hash_1, 0);
+        let prev_out = OutPoint::new(t_hash_1, 0);
         let mut key_material = BTreeMap::new();
         key_material.insert(prev_out.clone(), (pk, sk.clone()));
 
@@ -1089,7 +1089,7 @@ mod tests {
             &key_material
         );
         let tx_1_hash = construct_tx_hash(&payment_tx_1);
-        let tx_1_out_p = OutPoint::new_hash(tx_1_hash.clone(), 0);
+        let tx_1_out_p = OutPoint::new(tx_1_hash.clone(), 0);
         key_material.insert(tx_1_out_p.clone(), (pk, sk));
 
         // Second tx referencing first
@@ -1108,7 +1108,7 @@ mod tests {
         let payment_tx_2 = construct_tx_core(tx_ins_2, tx_outs, None);
 
         let tx_2_hash = construct_tx_hash(&payment_tx_2);
-        let tx_2_out_p = OutPoint::new_hash(tx_2_hash, 0);
+        let tx_2_out_p = OutPoint::new(tx_2_hash, 0);
 
         // BTreemap
         let mut btree = BTreeMap::new();
@@ -1145,7 +1145,7 @@ mod tests {
         let (pk, _sk) = sign::gen_keypair();
         let t_hash = TxHash::placeholder();
         let signature = sign::sign_detached(t_hash.to_string().as_bytes(), &sk);
-        let prev_out = OutPoint::new_hash(t_hash, 0);
+        let prev_out = OutPoint::new(t_hash, 0);
         let mut key_material = BTreeMap::new();
         key_material.insert(prev_out.clone(), (pk, sk));
 

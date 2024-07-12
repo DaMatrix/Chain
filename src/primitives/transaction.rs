@@ -158,6 +158,7 @@ impl<'de> Deserialize<'de> for TxHash {
 /// An outpoint - a combination of a transaction hash and an index n into its vout
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct OutPoint {
+    // TODO: jrabil: change this field to TxHash
     pub t_hash: String,
     pub n: u32,
 }
@@ -170,13 +171,7 @@ impl fmt::Display for OutPoint {
 
 impl OutPoint {
     /// Creates a new outpoint instance
-    // TODO: jrabil: remove this
-    pub fn new(t_hash: String, n: u32) -> OutPoint {
-        OutPoint { t_hash, n }
-    }
-
-    /// Creates a new outpoint instance
-    pub fn new_hash(t_hash: TxHash, n: u32) -> OutPoint {
+    pub fn new(t_hash: TxHash, n: u32) -> OutPoint {
         OutPoint { t_hash: t_hash.to_string(), n }
     }
 }

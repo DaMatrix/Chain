@@ -52,7 +52,7 @@ pub fn generate_tx_with_ins_and_outs_assets(
     // Generate inputs
     let tx_hash = TxHash::placeholder();
     for (input_amount, genesis_hash, md) in input_assets {
-        let tx_previous_out = OutPoint::new_hash(tx_hash.clone(), tx.inputs.len().try_into().unwrap());
+        let tx_previous_out = OutPoint::new(tx_hash.clone(), tx.inputs.len().try_into().unwrap());
         let tx_in_previous_out = match genesis_hash {
             Some(drs) => {
                 let item = Asset::item(*input_amount, Some(drs.to_string()), md.clone());

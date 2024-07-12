@@ -2732,7 +2732,7 @@ mod tests {
         let signature = sign::sign_detached(t_hash.to_string().as_bytes(), &sk);
 
         let tx_const = TxConstructor {
-            previous_out: OutPoint::new_hash(t_hash, 0),
+            previous_out: OutPoint::new(t_hash, 0),
             signatures: vec![signature],
             pub_keys: vec![pk],
             address_version,
@@ -2768,7 +2768,7 @@ mod tests {
         let signature = sign::sign_detached(t_hash.to_string().as_bytes(), &sk);
 
         let tx_const = TxConstructor {
-            previous_out: OutPoint::new_hash(t_hash, 0),
+            previous_out: OutPoint::new(t_hash, 0),
             signatures: vec![signature],
             pub_keys: vec![pk],
             address_version,
@@ -2984,7 +2984,7 @@ mod tests {
         let second_sig = sign::sign_detached(t_hash.to_string().as_bytes(), &second_sk);
 
         let tx_const = TxConstructor {
-            previous_out: OutPoint::new_hash(t_hash, 0),
+            previous_out: OutPoint::new(t_hash, 0),
             signatures: vec![first_sig, second_sig],
             pub_keys: vec![first_pk, second_pk, third_pk],
             address_version,
@@ -3049,7 +3049,7 @@ mod tests {
         //
         let (pk, sk) = sign::gen_keypair();
         let tx_hash = Placeholder::placeholder();
-        let tx_outpoint = OutPoint::new_hash(tx_hash, 0);
+        let tx_outpoint = OutPoint::new(tx_hash, 0);
         let script_public_key = construct_address_for(&pk, address_version);
         let tx_in_previous_out =
             TxOut::new_token_amount(script_public_key.clone(), TokenAmount(5), locktime);
@@ -3293,7 +3293,7 @@ mod tests {
         let signature = sign::sign_detached(t_hash.to_string().as_bytes(), &sk);
 
         let tx_const = TxConstructor {
-            previous_out: OutPoint::new_hash(t_hash, 0),
+            previous_out: OutPoint::new(t_hash, 0),
             signatures: vec![signature],
             pub_keys: vec![pk],
             address_version,
@@ -3328,7 +3328,7 @@ mod tests {
         let signature = sign::sign_detached(t_hash.to_string().as_bytes(), &sk);
 
         let tx_const = TxConstructor {
-            previous_out: OutPoint::new_hash(t_hash, 0),
+            previous_out: OutPoint::new(t_hash, 0),
             signatures: vec![signature],
             pub_keys: vec![pk],
             address_version,
