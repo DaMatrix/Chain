@@ -29,12 +29,6 @@ impl GenesisTxHashSpec {
     }
 }
 
-/// A user-friendly construction struct for a TxIn
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TxConstructor {
-    pub previous_out: OutPoint,
-}
-
 /// An outpoint - a combination of a transaction hash and an index n into its vout
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct OutPoint {

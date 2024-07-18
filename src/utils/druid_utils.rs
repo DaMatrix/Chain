@@ -71,8 +71,9 @@ mod tests {
     /// Util function to create valid DDE asset tx's
     fn create_dde_txs() -> Vec<Transaction> {
         let druid = "VALUE".to_owned();
-        let tx_input = construct_payment_tx_ins(vec![]);
+        let tx_input = [];
         let from_addr = construct_tx_ins_address(&tx_input);
+        let tx_input = [];
 
         let (pk, sk) = sign::gen_keypair();
         let prev_out = OutPoint::new("t_hash".to_string(), 0);
@@ -127,7 +128,7 @@ mod tests {
             genesis_hash: None,
         };
         let alice_tx =
-            construct_dde_tx(alice_druid_info, tx_input.clone(), vec![token_tx_out], None, &key_material);
+            construct_dde_tx(alice_druid_info, &tx_input, vec![token_tx_out], None, &key_material);
 
         let bob_druid_info = DdeValues {
             druid: druid.clone(),
@@ -135,7 +136,7 @@ mod tests {
             expectations: expects.clone(),
             genesis_hash: None,
         };
-        let bob_tx = construct_dde_tx(bob_druid_info, tx_input, vec![data_tx_out], None, &key_material);
+        let bob_tx = construct_dde_tx(bob_druid_info, &tx_input, vec![data_tx_out], None, &key_material);
 
         vec![alice_tx, bob_tx]
     }
@@ -148,8 +149,9 @@ mod tests {
         let payment = TokenAmount(11);
         let druid = "VALUE".to_owned();
 
-        let tx_input = construct_payment_tx_ins(vec![]);
+        let tx_input = [];
         let from_addr = construct_tx_ins_address(&tx_input);
+        let tx_input = [];
 
         let alice_addr = "1111".to_owned();
         let bob_addr = "00000".to_owned();
@@ -160,10 +162,6 @@ mod tests {
         // Act
         //
         let send_tx = {
-            let tx_ins = {
-                // constructors with enough money for amount and excess, caller responsibility.
-                construct_payment_tx_ins(vec![])
-            };
             let excess_tx_out =
                 TxOut::new_token_amount(sender_address_excess, amount - payment, None);
             
@@ -185,7 +183,7 @@ mod tests {
             };
 
             let mut tx = construct_rb_payments_send_tx(
-                tx_ins,
+                &tx_input,
                 Vec::new(),
                 None,
                 ReceiverInfo {
@@ -203,11 +201,6 @@ mod tests {
         };
 
         let recv_tx = {
-            let tx_ins = {
-                // constructors with enough money for amount and excess, caller responsibility.
-                let tx_ins_constructor = vec![];
-                construct_payment_tx_ins(tx_ins_constructor)
-            };
             let expectation = DruidExpectation {
                 from: from_addr,
                 to: bob_addr,
@@ -222,7 +215,7 @@ mod tests {
             };
 
             // create the sender that match the receiver.
-            construct_rb_receive_payment_tx(tx_ins, Vec::new(), None, alice_addr, 0, druid_info, &key_material)
+            construct_rb_receive_payment_tx(&tx_input, Vec::new(), None, alice_addr, 0, druid_info, &key_material)
         };
 
         (send_tx, recv_tx)

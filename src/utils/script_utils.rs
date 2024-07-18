@@ -2720,16 +2720,15 @@ mod tests {
             n: 0,
         };
         let mut key_material = BTreeMap::new();
-        key_material.insert(outpoint.clone(), (pk, sk));
-
-        let tx_const = TxConstructor {
-            previous_out: outpoint,
-        };
+        key_material.insert(outpoint.clone(), (pk, sk.clone()));
 
         let tx_outs = vec![];
-        let mut tx_ins = construct_payment_tx_ins(vec![tx_const]);
-        tx_ins = update_input_signatures(&crate::utils::transaction_utils::tx_ins_to_p2pkh_constructors(&tx_ins, &key_material), &tx_outs, &key_material);
-
+        let tx_ins = [TxInConstructor::P2PKH {
+            previous_out: &outpoint,
+            public_key: &pk,
+            secret_key: &sk,
+        }];
+        let tx_ins = update_input_signatures(&tx_ins, &tx_outs, &key_material);
         let hash_to_sign = construct_tx_in_out_signable_hash(&tx_ins[0], &tx_outs);
         let tx_out_pk = construct_address(&pk);
 
@@ -2750,14 +2749,22 @@ mod tests {
             n: 0,
         };
 
-        let hash_to_sign = construct_tx_in_signable_hash(&outpoint);
+        let tx_outs = [];
 
-        let tx_const = TxConstructor {
-            previous_out: outpoint,
-        };
+        let hash_to_sign = construct_tx_in_out_signable_hash(&TxIn {
+            previous_out: Some(outpoint.clone()),
+            script_signature: Script::new(),
+        }, &tx_outs);
 
-        let tx_ins = construct_payment_tx_ins(vec![tx_const]);
-        let tx_out_pk = construct_address(&pk);
+        let tx_ins = [TxInConstructor::P2PKH {
+            previous_out: &outpoint,
+            public_key: &pk,
+            secret_key: &sk,
+        }];
+        let tx_ins = update_input_signatures(&tx_ins, &[], &BTreeMap::from([
+            (outpoint.clone(), (pk, sk.clone())),
+        ]));
+        let tx_out_pk = construct_address(&second_pk);
 
         assert!(!tx_has_valid_p2pkh_sig(
             &tx_ins[0].script_signature,
@@ -2777,19 +2784,10 @@ mod tests {
 
         let hash_to_sign = construct_tx_in_signable_hash(&outpoint);
 
-        let tx_const = TxConstructor {
-            previous_out: outpoint,
-        };
-
-        let mut tx_ins = Vec::new();
-
-        for entry in [tx_const] {
-            let mut new_tx_in = TxIn::new();
-            new_tx_in.script_signature = Script::new();
-            new_tx_in.previous_out = Some(entry.previous_out);
-
-            tx_ins.push(new_tx_in);
-        }
+        let tx_ins = [TxIn {
+            previous_out: Some(outpoint),
+            script_signature: Script::new(),
+        }];
 
         let tx_out_pk = construct_address(&pk);
 
@@ -2811,23 +2809,12 @@ mod tests {
 
         let hash_to_sign = construct_tx_in_signable_hash(&outpoint);
 
-        let tx_const = TxConstructor {
-            previous_out: outpoint,
-        };
-
-        let mut tx_ins = Vec::new();
-
-        for entry in [tx_const] {
-            let mut new_tx_in = TxIn::new();
-            new_tx_in.script_signature = Script::new();
-            new_tx_in
-                .script_signature
-                .stack
-                .push(StackEntry::Bytes("".as_bytes().to_vec()));
-            new_tx_in.previous_out = Some(entry.previous_out);
-
-            tx_ins.push(new_tx_in);
-        }
+        let tx_ins = [TxIn {
+            previous_out: Some(outpoint),
+            script_signature: Script::from(vec![
+                StackEntry::Bytes(vec![]),
+            ]),
+        }];
 
         let tx_out_pk = construct_address(&pk);
 
