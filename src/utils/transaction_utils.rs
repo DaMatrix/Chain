@@ -334,8 +334,8 @@ pub fn construct_item_create_tx(
     let tx_ins = construct_create_tx_in(block_num, &asset, public_key, secret_key);
     let tx_out = TxOut {
         value: asset,
+        locktime: 0,
         script_public_key: Some(receiver_address),
-        ..Default::default()
     };
 
     construct_tx_core(tx_ins, vec![tx_out], fee)
@@ -414,8 +414,9 @@ pub fn construct_burn_tx(tx_ins: Vec<TxIn>, fee: Option<ReceiverInfo>, key_mater
     let script_hash = construct_p2sh_address(&script);
 
     let tx_out = TxOut {
+        value: Default::default(),
+        locktime: 0,
         script_public_key: Some(script_hash),
-        ..Default::default()
     };
     let tx_outs = vec![tx_out];
 
@@ -1055,8 +1056,8 @@ mod tests {
         let tx_ins = construct_payment_tx_ins(vec![tx_const]);
         let tx_outs = vec![TxOut {
             value: data.clone(),
+            locktime: 0,
             script_public_key: Some(to_asset.clone()),
-            ..Default::default()
         }];
 
         let bytes = match bincode::serde::encode_to_vec(&tx_ins, bincode::config::legacy()) {

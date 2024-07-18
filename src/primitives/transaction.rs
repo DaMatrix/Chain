@@ -117,7 +117,7 @@ impl TxIn {
 /// An output of a transaction. It contains the public key that the next input
 /// must be able to sign with to claim it. It also contains the block hash for the
 /// potential DRS if this is a data asset transaction
-#[derive(Default, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TxOut {
     pub value: Asset,
     pub locktime: u64,
@@ -125,11 +125,6 @@ pub struct TxOut {
 }
 
 impl TxOut {
-    /// Creates a new TxOut instance
-    pub fn new() -> TxOut {
-        Default::default()
-    }
-
     pub fn new_token_amount(
         to_address: String,
         amount: TokenAmount,

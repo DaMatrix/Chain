@@ -95,14 +95,14 @@ mod tests {
         // TxOuts
         let token_tx_out = TxOut {
             value: alice_asset.clone(),
+            locktime: 0,
             script_public_key: Some(bob_addr.clone()),
-            ..Default::default()
         };
 
         let data_tx_out = TxOut {
             value: bob_asset.clone(),
+            locktime: 0,
             script_public_key: Some(alice_addr.clone()),
-            ..Default::default()
         };
 
         // Expectations (from addresses the same due to empty TxIn)
