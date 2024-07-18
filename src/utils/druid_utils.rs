@@ -192,7 +192,7 @@ mod tests {
                 Vec::new(),
                 None,
                 ReceiverInfo {
-                    address: bob_addr.to_string(),
+                    address: bob_addr.clone(),
                     asset: Asset::Token(payment),
                 },
                 0,

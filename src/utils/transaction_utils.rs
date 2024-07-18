@@ -11,7 +11,7 @@ use tracing::debug;
 use crate::primitives::address::{AnyAddress, P2PKHAddress};
 
 pub struct ReceiverInfo {
-    pub address: String,
+    pub address: AnyAddress,
     pub asset: Asset,
 }
 
@@ -363,7 +363,7 @@ pub fn construct_payment_tx(
     let tx_out = TxOut {
         value: receiver.asset,
         locktime,
-        script_public_key: receiver.address.parse().expect(&receiver.address),
+        script_public_key: receiver.address,
     };
     let tx_outs = vec![tx_out];
     let final_tx_ins = update_input_signatures(&tx_ins, &tx_outs, key_material);
@@ -443,7 +443,7 @@ pub fn construct_tx_core(
         Some(fee) => vec![TxOut {
             value: fee.asset,
             locktime: 0,
-            script_public_key: fee.address.parse().expect(&fee.address),
+            script_public_key: fee.address,
         }],
         None => vec![],
     };
@@ -542,7 +542,7 @@ pub fn construct_rb_payments_send_tx(
     let out = TxOut {
         value: receiver.asset,
         locktime,
-        script_public_key: receiver.address.parse().expect(&receiver.address),
+        script_public_key: receiver.address,
     };
     tx_outs.push(out);
     construct_rb_tx_core(
@@ -793,7 +793,7 @@ mod tests {
         let payment_tx = construct_payment_tx(
             tx_ins,
             ReceiverInfo {
-                address: address.to_string(),
+                address: address.clone(),
                 asset: Asset::Token(token_amount),
             },
             None,
@@ -817,11 +817,11 @@ mod tests {
         let payment_tx = construct_payment_tx(
             tx_ins,
             ReceiverInfo {
-                address: hex::encode(vec![0; 32]),
+                address: Placeholder::placeholder(),
                 asset: Asset::Token(token_amount),
             },
             Some(ReceiverInfo {
-                address: hex::encode(vec![0; 32]),
+                address: Placeholder::placeholder(),
                 asset: Asset::Token(fee_amount),
             }),
             0,
@@ -854,11 +854,11 @@ mod tests {
         let payment_tx_valid = construct_payment_tx(
             tx_ins,
             ReceiverInfo {
-                address: hex::encode(vec![0; 32]),
+                address: Placeholder::placeholder(),
                 asset: Asset::Token(tokens),
             },
             Some(ReceiverInfo {
-                address: hex::encode(vec![0; 32]),
+                address: Placeholder::placeholder(),
                 asset: Asset::Token(fees),
             }),
             0,
@@ -899,11 +899,11 @@ mod tests {
         let payment_tx_valid = construct_payment_tx(
             tx_ins,
             ReceiverInfo {
-                address: hex::encode(vec![0; 32]),
+                address: Placeholder::placeholder(),
                 asset: Asset::Item(item_asset_valid),
             },
             Some(ReceiverInfo {
-                address: hex::encode(vec![0; 32]),
+                address: Placeholder::placeholder(),
                 asset: Asset::Token(fees),
             }),
             0,
@@ -946,7 +946,7 @@ mod tests {
         let payment_tx_valid = construct_payment_tx(
             tx_ins,
             ReceiverInfo {
-                address: hex::encode(vec![0; 32]),
+                address: Placeholder::placeholder(),
                 asset: Asset::Item(item_asset_valid),
             },
             None,
@@ -990,7 +990,7 @@ mod tests {
         let payment_tx_1 = construct_payment_tx(
             tx_ins_1,
             ReceiverInfo {
-                address: addr.to_string(),
+                address: addr.clone(),
                 asset: Asset::Token(token_amount),
             },
             None,
@@ -1133,7 +1133,7 @@ mod tests {
                 Vec::new(),
                 None,
                 ReceiverInfo {
-                    address: bob_addr.to_string(),
+                    address: bob_addr.clone(),
                     asset: Asset::Token(payment),
                 },
                 0,
