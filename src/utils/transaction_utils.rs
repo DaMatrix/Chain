@@ -1,6 +1,6 @@
 use crate::constants::*;
 use crate::crypto::{sha3_256, sign_ed25519};
-use crate::crypto::sign_ed25519::{self as sign, sign_detached, PublicKey, SecretKey};
+use crate::crypto::sign_ed25519::{self as sign, PublicKey, SecretKey};
 use crate::primitives::asset::Asset;
 use crate::primitives::druid::{DdeValues, DruidExpectation};
 use crate::primitives::transaction::*;
@@ -33,20 +33,6 @@ pub fn construct_p2sh_address(script: &Script) -> String {
     todo!("P2SH not yet supported!")
 }
 
-/// Builds an address from a public key and a specified network version
-///
-/// ### Arguments
-///
-/// * `pub_key` - A public key to build an address from
-/// * `address_version` - Network version to use for the address
-pub fn construct_address_for(pub_key: &PublicKey, address_version: Option<u64>) -> String {
-    match address_version {
-        Some(NETWORK_VERSION_V0) => construct_address_v0(pub_key),
-        Some(NETWORK_VERSION_TEMP) => construct_address_temp(pub_key),
-        _ => construct_address(pub_key),
-    }
-}
-
 /// Builds an address from a public key
 ///
 /// ### Arguments
@@ -54,58 +40,6 @@ pub fn construct_address_for(pub_key: &PublicKey, address_version: Option<u64>) 
 /// * `pub_key` - A public key to build an address from
 pub fn construct_address(pub_key: &PublicKey) -> String {
     hex::encode(sha3_256::digest(pub_key.as_ref()))
-}
-
-/// Builds an old (network version 0) address from a public key
-///
-/// ### Arguments
-///
-/// * `pub_key` - A public key to build an address from
-pub fn construct_address_v0(pub_key: &PublicKey) -> String {
-    let first_pubkey_bytes = {
-        // We used sodiumoxide serialization before with a 64 bit length prefix.
-        // Make clear what we are using as this was not intended.
-        let mut v = vec![32, 0, 0, 0, 0, 0, 0, 0];
-        v.extend_from_slice(pub_key.as_ref());
-        v
-    };
-    let mut first_hash = sha3_256::digest(&first_pubkey_bytes).to_vec();
-    first_hash.truncate(V0_ADDRESS_LENGTH);
-    hex::encode(first_hash)
-}
-
-/// Builds an address from a public key using the
-/// temporary address scheme present on the wallet
-///
-/// TODO: Deprecate after addresses retire
-///
-/// ### Arguments
-///
-/// * `pub_key` - A public key to build an address from
-pub fn construct_address_temp(pub_key: &PublicKey) -> String {
-    let base64_encoding = base64::encode(pub_key.as_ref());
-    let hex_decoded = decode_base64_as_hex(&base64_encoding);
-    hex::encode(sha3_256::digest(&hex_decoded))
-}
-
-/// Decodes a base64 encoded string as hex, invalid character pairs are decoded up to the
-/// first character. If the decoding up to the first character fails, a default value of 0
-/// is used.
-///
-/// TODO: Deprecate after addresses retire
-///
-/// ### Arguments
-///
-/// * `s`   - Base64 encoded string
-pub fn decode_base64_as_hex(s: &str) -> Vec<u8> {
-    (ZERO..s.len())
-        .step_by(TWO)
-        .map(|i| {
-            u8::from_str_radix(&s[i..i + TWO], SIXTEEN as u32)
-                .or_else(|_| u8::from_str_radix(&s[i..i + ONE], SIXTEEN as u32))
-                .unwrap_or_default()
-        })
-        .collect()
 }
 
 /// Constructs signable string for OutPoint
@@ -164,7 +98,7 @@ pub fn get_stack_entry_signable_string(entry: &StackEntry) -> String {
         }
         StackEntry::PubKey(pub_key) => format!("PubKey:{}", hex::encode(pub_key.as_ref())),
         StackEntry::Num(num) => format!("Num:{num}"),
-        StackEntry::Bytes(bytes) => format!("Bytes:{bytes}"),
+        StackEntry::Bytes(bytes) => format!("Bytes:{}", hex::encode(bytes)),
     }
 }
 
@@ -631,10 +565,9 @@ fn construct_tx_in(
             TxIn {
                 previous_out: Some(previous_out.clone()),
                 script_signature: Script::pay2pkh(
-                    signable_hash,
+                    hex::decode(&signable_hash).unwrap(),
                     signature,
                     *public_key,
-                    None,
                 ),
             }
         }
@@ -791,25 +724,7 @@ mod tests {
     use crate::primitives::asset::{AssetValues, ItemAsset, TokenAmount};
     use crate::utils::script_utils::tx_outs_are_valid;
 
-    #[test]
-    // Creates a valid payment transaction
-    fn test_construct_a_valid_payment_tx() {
-        test_construct_a_valid_payment_tx_common(None);
-    }
-
-    #[test]
-    // Creates a valid payment transaction
-    fn test_construct_a_valid_payment_tx_v0() {
-        test_construct_a_valid_payment_tx_common(Some(NETWORK_VERSION_V0));
-    }
-
-    #[test]
-    // Creates a valid payment transaction
-    fn test_construct_a_valid_payment_tx_temp() {
-        test_construct_a_valid_payment_tx_common(Some(NETWORK_VERSION_TEMP));
-    }
-
-    fn test_construct_valid_inputs(address_version: Option<u64>) -> (Vec<TxIn>, String, BTreeMap<OutPoint, (PublicKey, SecretKey)>) {
+    fn test_construct_valid_inputs() -> (Vec<TxIn>, String, BTreeMap<OutPoint, (PublicKey, SecretKey)>) {
         let (_pk, sk) = sign::gen_keypair();
         let (pk, _sk) = sign::gen_keypair();
         let t_hash = vec![0, 0, 0];
@@ -821,7 +736,6 @@ mod tests {
 
         let tx_const = TxConstructor {
             previous_out: prev_out,
-            address_version,
         };
 
         let tx_ins = construct_payment_tx_ins(vec![tx_const]);
@@ -833,7 +747,7 @@ mod tests {
     #[should_panic]
     fn test_construct_a_valid_p2sh_tx() {
         /*let token_amount = TokenAmount(400000);
-        let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs(Some(NETWORK_VERSION_V0));
+        let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs();
         let mut script = Script::new_for_coinbase(10);
         script.stack.push(StackEntry::Op(OpCodes::OP_DROP));
 
@@ -843,7 +757,6 @@ mod tests {
 
         let tx_const = TxConstructor {
             previous_out: OutPoint::new(spending_tx_hash, 0),
-            address_version: Some(NETWORK_VERSION_V0),
         };
 
         let redeeming_tx_ins = construct_p2sh_redeem_tx_ins(tx_const, script.clone());
@@ -875,7 +788,7 @@ mod tests {
     #[should_panic]
     fn test_construct_a_valid_burn_tx() {
         /*let token_amount = TokenAmount(400000);
-        let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs(Some(NETWORK_VERSION_V0));
+        let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs();
 
         let burn_tx = construct_burn_tx(tx_ins, None, &key_material);
 
@@ -883,7 +796,6 @@ mod tests {
 
         let tx_const = TxConstructor {
             previous_out: OutPoint::new(spending_tx_hash, 0),
-            address_version: Some(NETWORK_VERSION_V0),
         };
 
         let s = vec![StackEntry::Op(OpCodes::OP_BURN)];
@@ -915,8 +827,9 @@ mod tests {
         // TODO: Add assertion for full tx validity
     }
 
-    fn test_construct_a_valid_payment_tx_common(address_version: Option<u64>) {
-        let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs(address_version);
+    #[test]
+    fn test_construct_a_valid_payment_tx() {
+        let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs();
 
         let token_amount = TokenAmount(400000);
         let payment_tx = construct_payment_tx(
@@ -939,7 +852,7 @@ mod tests {
     #[test]
     /// Creates a valid payment transaction including fees
     fn test_construct_valid_payment_tx_with_fees() {
-        let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs(None);
+        let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs();
 
         let token_amount = TokenAmount(400000);
         let fee_amount = TokenAmount(1000);
@@ -974,7 +887,6 @@ mod tests {
 
         let tx_const = TxConstructor {
             previous_out: prev_out.clone(),
-            address_version: Some(2),
         };
 
         let tx_ins = construct_payment_tx_ins(vec![tx_const]);
@@ -1014,7 +926,6 @@ mod tests {
 
         let tx_const = TxConstructor {
             previous_out: prev_out.clone(),
-            address_version: Some(2),
         };
 
         let drs_tx_hash = "item_tx_hash".to_string();
@@ -1058,7 +969,6 @@ mod tests {
 
         let tx_const = TxConstructor {
             previous_out: prev_out.clone(),
-            address_version: Some(2),
         };
 
         let genesis_hash = "item_tx_hash".to_string();
@@ -1090,22 +1000,6 @@ mod tests {
     #[test]
     // Creates a valid UTXO set
     fn test_construct_valid_utxo_set() {
-        test_construct_valid_utxo_set_common(None);
-    }
-
-    #[test]
-    // Creates a valid UTXO set
-    fn test_construct_valid_utxo_set_v0() {
-        test_construct_valid_utxo_set_common(Some(NETWORK_VERSION_V0));
-    }
-
-    #[test]
-    // Creates a valid UTXO set
-    fn test_construct_valid_utxo_set_temp() {
-        test_construct_valid_utxo_set_common(Some(NETWORK_VERSION_TEMP));
-    }
-
-    fn test_construct_valid_utxo_set_common(address_version: Option<u64>) {
         let (pk, sk) = sign::gen_keypair();
 
         let t_hash_1 = hex::encode(vec![0, 0, 0]);
@@ -1117,7 +1011,6 @@ mod tests {
 
         let tx_1 = TxConstructor {
             previous_out: prev_out.clone(),
-            address_version,
         };
 
         let token_amount = TokenAmount(400000);
@@ -1139,7 +1032,6 @@ mod tests {
         // Second tx referencing first
         let tx_2 = TxConstructor {
             previous_out: tx_1_out_p.clone(),
-            address_version,
         };
         let tx_ins_2 = construct_payment_tx_ins(vec![tx_2]);
         let tx_outs = vec![TxOut::new_token_amount(
@@ -1167,22 +1059,6 @@ mod tests {
     #[test]
     // Creates a valid DDE transaction
     fn test_construct_a_valid_dde_tx() {
-        test_construct_a_valid_dde_tx_common(None);
-    }
-
-    #[test]
-    // Creates a valid DDE transaction
-    fn test_construct_a_valid_dde_tx_v0() {
-        test_construct_a_valid_dde_tx_common(Some(NETWORK_VERSION_V0));
-    }
-
-    #[test]
-    // Creates a valid DDE transaction
-    fn test_construct_a_valid_dde_tx_temp() {
-        test_construct_a_valid_dde_tx_common(Some(NETWORK_VERSION_TEMP));
-    }
-
-    fn test_construct_a_valid_dde_tx_common(address_version: Option<u64>) {
         let (_pk, sk) = sign::gen_keypair();
         let (pk, _sk) = sign::gen_keypair();
         let t_hash = hex::encode(vec![0, 0, 0]);
@@ -1199,7 +1075,6 @@ mod tests {
 
         let tx_const = TxConstructor {
             previous_out: prev_out.clone(),
-            address_version,
         };
 
         let tx_ins = construct_payment_tx_ins(vec![tx_const]);
@@ -1342,22 +1217,6 @@ mod tests {
     #[test]
     // Test valid address construction; should correlate with test on wallet
     fn test_construct_valid_addresses() {
-        test_construct_valid_addresses_common(None);
-    }
-
-    #[test]
-    // Test valid address construction; should correlate with test on wallet
-    fn test_construct_valid_addresses_v0() {
-        test_construct_valid_addresses_common(Some(NETWORK_VERSION_V0));
-    }
-
-    #[test]
-    // Test valid address construction; should correlate with test on wallet
-    fn test_construct_valid_addresses_temp() {
-        test_construct_valid_addresses_common(Some(NETWORK_VERSION_TEMP));
-    }
-
-    fn test_construct_valid_addresses_common(address_version: Option<u64>) {
         //
         // Arrange
         //
@@ -1376,32 +1235,17 @@ mod tests {
         //
         let actual_pub_addresses: Vec<String> = pub_keys
             .iter()
-            .map(|pub_key| construct_address_for(pub_key, address_version))
+            .map(construct_address)
             .collect();
 
         //
         // Assert
         //
-        let expected_pub_addresses = match address_version {
-            // Old Address structure
-            Some(NETWORK_VERSION_V0) => vec![
-                "13bd3351b78beb2d0dadf2058dcc926c",
-                "abc7c0448465c4507faf2ee588728824",
-                "6ae52e3870884ab66ec49d3bb359c0bf",
-            ],
-            // Temporary address structure present on wallet
-            Some(NETWORK_VERSION_TEMP) => vec![
-                "6c6b6e8e9df8c63d22d9eb687b9671dd1ce5d89f195bb2316e1b1444848cd2b3",
-                "8ac2fdcb0688abb2727d63ed230665b275a1d3a28373baa92a9afa5afd610e9f",
-                "0becdaaf6a855f04961208ee992651c11df0be91c08629dfc079d05d2915ec22",
-            ],
-            // Current address structure
-            _ => vec![
-                "5423e6bd848e0ce5cd794e55235c23138d8833633cd2d7de7f4a10935178457b",
-                "77516e2d91606250e625546f86702510d2e893e4a27edfc932fdba03c955cc1b",
-                "4cfd64a6692021fc417368a866d33d94e1c806747f61ac85e0b3935e7d5ed925",
-            ],
-        };
+        let expected_pub_addresses = vec![
+            "5423e6bd848e0ce5cd794e55235c23138d8833633cd2d7de7f4a10935178457b",
+            "77516e2d91606250e625546f86702510d2e893e4a27edfc932fdba03c955cc1b",
+            "4cfd64a6692021fc417368a866d33d94e1c806747f61ac85e0b3935e7d5ed925",
+        ];
         assert_eq!(actual_pub_addresses, expected_pub_addresses);
     }
 
@@ -1502,7 +1346,7 @@ mod tests {
                     Signature::from_slice(hex::decode(signatures[n]).unwrap().as_ref()).unwrap();
                 let pk = PublicKey::from_slice(hex::decode(pub_keys[n]).unwrap().as_ref()).unwrap();
 
-                let script = Script::pay2pkh(sig_data, sig, pk, None);
+                let script = Script::pay2pkh(hex::decode(&sig_data).unwrap(), sig, pk);
                 let out_p = previous_out_points[n].clone();
 
                 TxIn::new_from_input(out_p, script)

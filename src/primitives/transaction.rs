@@ -33,7 +33,6 @@ impl GenesisTxHashSpec {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TxConstructor {
     pub previous_out: OutPoint,
-    pub address_version: Option<u64>,
 }
 
 /// An outpoint - a combination of a transaction hash and an index n into its vout
