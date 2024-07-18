@@ -1072,7 +1072,7 @@ mod tests {
         let participants = 2;
         let expects = vec![DruidExpectation {
             from: from_addr,
-            to: to_address.to_string(),
+            to: to_address,
             asset: data.clone(),
         }];
 
@@ -1124,7 +1124,7 @@ mod tests {
 
             let expectation = DruidExpectation {
                 from: from_addr.clone(),
-                to: alice_addr.to_string(),
+                to: alice_addr.clone(),
                 asset: Asset::item(1, Some("genesis_hash".to_owned()), None),
             };
 
@@ -1159,7 +1159,7 @@ mod tests {
             };
             let expectation = DruidExpectation {
                 from: from_addr,
-                to: bob_addr.to_string(),
+                to: bob_addr.clone(),
                 asset: Asset::Token(payment),
             };
 

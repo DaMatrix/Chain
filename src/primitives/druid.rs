@@ -1,11 +1,12 @@
 use crate::primitives::asset::Asset;
 use serde::{Deserialize, Serialize};
+use crate::primitives::address::AnyAddress;
 
 /// The expectation to be met in a specific DRUID transaction
 #[derive(Clone, Debug, Ord, Eq, PartialEq, Serialize, Deserialize, PartialOrd)]
 pub struct DruidExpectation {
     pub from: String,
-    pub to: String, // TODO: Make this an AnyAddress
+    pub to: AnyAddress,
     pub asset: Asset,
 }
 

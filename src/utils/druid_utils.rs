@@ -54,7 +54,7 @@ pub fn druid_expectations_are_met<'a>(
 /// * `e`           - The expectation to check on
 /// * `tx_source`   - The source transaction source to match against
 fn expectation_met(e: &DruidExpectation, tx_source: &BTreeSet<(String, &AnyAddress, &Asset)>) -> bool {
-    tx_source.get(&(e.from.clone(), &e.to.parse().expect(&e.to), &e.asset)).is_some()
+    tx_source.get(&(e.from.clone(), &e.to, &e.asset)).is_some()
 }
 
 #[cfg(test)]
@@ -112,12 +112,12 @@ mod tests {
         let expects = vec![
             DruidExpectation {
                 from: from_addr.clone(),
-                to: bob_addr.to_string(),
+                to: bob_addr,
                 asset: alice_asset,
             },
             DruidExpectation {
                 from: from_addr,
-                to: alice_addr.to_string(),
+                to: alice_addr,
                 asset: bob_asset,
             },
         ];
@@ -176,7 +176,7 @@ mod tests {
 
             let expectation = DruidExpectation {
                 from: from_addr.clone(),
-                to: alice_addr.to_string(),
+                to: alice_addr.clone(),
                 asset: Asset::item(1, Some("genesis_hash".to_owned()), None),
             };
 
@@ -213,7 +213,7 @@ mod tests {
             };
             let expectation = DruidExpectation {
                 from: from_addr,
-                to: bob_addr.to_string(),
+                to: bob_addr,
                 asset: Asset::Token(payment),
             };
 
@@ -247,7 +247,7 @@ mod tests {
 
         let druid_info = change_tx.druid_info.clone();
         let mut expects = druid_info.unwrap().expectations;
-        expects[0].to = AnyAddress::placeholder().to_string();
+        expects[0].to = AnyAddress::placeholder();
 
         // New druid info
         let nm_druid_info = DdeValues {
