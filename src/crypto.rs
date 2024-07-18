@@ -1,10 +1,9 @@
 pub use ring;
-use tracing::warn;
 
 macro_rules! fixed_bytes_wrapper {
     ($vis:vis struct $name:ident, $n:expr, $doc:literal) => {
         #[doc = $doc]
-        #[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
+        #[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize, bincode::Encode, bincode::Decode)]
         $vis struct $name(crate::utils::serialize_utils::FixedByteArray<$n>);
 
         impl $name {
@@ -52,7 +51,7 @@ pub mod sign_ed25519 {
     pub use ring::signature::{ED25519, ED25519_PUBLIC_KEY_LEN};
     use serde::{Deserialize, Serialize};
     use std::convert::TryInto;
-    use crate::crypto::generate_random;
+    use crate::crypto::generate_secure_random;
 
     // Constants copied from the ring library
     const SCALAR_LEN: usize = 32;
@@ -92,11 +91,10 @@ pub mod sign_ed25519 {
             PublicKey::from_slice(keypair.public_key().as_ref())
                 .expect("Keypair public key length is invalid?!?")
         }
-    }
 
-    impl From<ring::pkcs8::Document> for SecretKey {
-        fn from(value: ring::pkcs8::Document) -> Self {
-            Self(value.as_ref().to_vec())
+        /// Gets a reference to the PKCS8 document which describes this secret key.
+        pub fn get_pkcs8(&self) -> &[u8] {
+            &self.0
         }
     }
 
@@ -118,20 +116,14 @@ pub mod sign_ed25519 {
         }
     }
 
-    impl AsRef<[u8]> for SecretKey {
-        fn as_ref(&self) -> &[u8] {
-            self.0.as_ref()
-        }
-    }
-
     pub fn verify_detached(sig: &Signature, msg: &[u8], pk: &PublicKey) -> bool {
         let upk = UnparsedPublicKey::new(&ED25519, pk);
         upk.verify(msg, sig.as_ref()).is_ok()
     }
 
     pub fn sign_detached(msg: &[u8], sk: &SecretKey) -> Signature {
-        let keypair = SecretKeyBase::from_pkcs8(sk.as_ref())
-                .expect("Invalid PKCS8 secret key?!?");
+        let keypair = SecretKeyBase::from_pkcs8(sk.get_pkcs8())
+            .expect("Invalid PKCS8 secret key?!?");
 
         let signature = keypair.sign(msg).as_ref().try_into()
             .expect("Invalid signature?!?");
@@ -140,7 +132,7 @@ pub mod sign_ed25519 {
 
     /// Generates a completely random Ed25519 keypair.
     pub fn gen_keypair() -> (PublicKey, SecretKey) {
-        let seed = generate_random();
+        let seed = generate_secure_random();
         gen_keypair_from_seed(&seed)
     }
 
@@ -163,14 +155,14 @@ pub mod sign_ed25519 {
 
         let public_key = PublicKey(keypair.public_key().as_ref().try_into()
             .expect("Generated keypair contains an invalid public key?!?"));
-        let secret_key = pkcs8.into();
+        let secret_key = SecretKey(pkcs8.as_ref().to_vec());
         (public_key, secret_key)
     }
 }
 
 pub mod secretbox_chacha20_poly1305 {
     // Use key and nonce separately like rust-tls does
-    use super::generate_random;
+    use super::generate_secure_random;
     pub use ring::aead::LessSafeKey as KeyBase;
     pub use ring::aead::Nonce as NonceBase;
     pub use ring::aead::NONCE_LEN;
@@ -217,16 +209,16 @@ pub mod secretbox_chacha20_poly1305 {
     }
 
     pub fn gen_key() -> Key {
-        Key(generate_random().into())
+        Key(generate_secure_random().into())
     }
 
     pub fn gen_nonce() -> Nonce {
-        Nonce(generate_random().into())
+        Nonce(generate_secure_random().into())
     }
 }
 
 pub mod pbkdf2 {
-    use super::generate_random;
+    use super::generate_secure_random;
     use ring::pbkdf2::{derive, PBKDF2_HMAC_SHA256};
     use serde::{Deserialize, Serialize};
     use std::convert::TryInto;
@@ -250,7 +242,7 @@ pub mod pbkdf2 {
     }
 
     pub fn gen_salt() -> Salt {
-        Salt(generate_random().into())
+        Salt(generate_secure_random().into())
     }
 }
 
@@ -310,27 +302,55 @@ pub mod sha3_256 {
         }
     }
 
+    /// Computes the SHA3-256 hash of the given bytes.
+    ///
+    /// ### Arguments
+    ///
+    /// * `data`  - the bytes to hash
     pub fn digest(data: &[u8]) -> Hash {
         Hash(Sha3_256::digest(data).try_into().unwrap())
     }
 
-    pub fn digest_all<'a>(data: impl Iterator<Item = &'a [u8]>) -> Hash {
+    /// Concatenates all the given byte slices and computes the SHA3-256 hash of the result.
+    ///
+    /// ### Arguments
+    ///
+    /// * `data_parts`  - the byte slices to concatenate and hash
+    pub fn digest_all<'a>(data_parts: impl IntoIterator<Item = &'a [u8]>) -> Hash {
         let mut hasher = Sha3_256::new();
-        data.for_each(|v| hasher.update(v));
+        data_parts.into_iter().for_each(|v| hasher.update(v));
         Hash(hasher.finalize().try_into().unwrap())
+    }
+
+    /// Serializes the given value using bincode-serde and computes the SHA3-256 hash of the result.
+    ///
+    /// ### Arguments
+    ///
+    /// * `value`  - the value to serialize and hash
+    pub fn digest_encode<S: bincode::Encode, C: bincode::config::Config>(value: &S, config: C) -> Result<Hash, bincode::error::EncodeError> {
+        let mut hasher = Sha3_256::new();
+        bincode::encode_into_std_write(value, &mut hasher, config)?;
+        Ok(Hash(hasher.finalize().try_into().unwrap()))
+    }
+
+    /// Serializes the given value using bincode-serde and computes the SHA3-256 hash of the result.
+    ///
+    /// ### Arguments
+    ///
+    /// * `value`  - the value to serialize and hash
+    pub fn digest_serialize<S: serde::Serialize>(value: &S) -> Result<Hash, bincode::error::EncodeError> {
+        let mut hasher = Sha3_256::new();
+        bincode::serde::encode_into_std_write(value, &mut hasher, bincode::config::legacy())?;
+        Ok(Hash(hasher.finalize().try_into().unwrap()))
     }
 }
 
-fn generate_random<const N: usize>() -> [u8; N] {
-    let mut value: [u8; N] = [0; N];
-
+fn generate_secure_random<const N: usize>() -> [u8; N] {
     use ring::rand::SecureRandom;
     let rand = ring::rand::SystemRandom::new();
-    match rand.fill(&mut value) {
-        Ok(_) => (),
-        Err(_) => warn!("Failed to generate random bytes"),
-    };
 
+    let mut value = [0u8; N];
+    rand.fill(&mut value).expect("Failed to generate random bytes");
     value
 }
 
@@ -380,7 +400,7 @@ mod test {
 
     #[test]
     fn test_ed25519_secret_key() {
-        assert_eq!(hex::encode(sign_ed25519::SecretKey::placeholder_seed([])),
+        assert_eq!(hex::encode(sign_ed25519::SecretKey::placeholder_seed([]).get_pkcs8()),
                    "3053020101300506032b6570042204203651dccde39be8697d8e0690acd90e3b8ce7f596c5f205fbd0b3b3e3a68629e1a12303210092bc778f74110b3fcbcf8a4df71ed9a33c62faa8d01417d381745ef700ef6b73");
 
         test_placeholders_different_seed::<sign_ed25519::SecretKey>();
@@ -410,5 +430,49 @@ mod test {
         test_fixed_bytes_wrapper::<pbkdf2::Salt>(
             "81c4a8cde605d6b51857eb6ebaead0de98cf254d4855725db7aec45a98699e9c",
         );
+    }
+
+    #[test]
+    fn test_sha3_256_digest_encode() {
+        // ensure that sha3_256::digest_encode gives the same result as encoding the full
+        // object into a buffer and then hashing that
+        macro_rules! test_case {
+            ($t:ty: $($n:literal)*) => {
+                $(
+                    let arr : [$t; $n] = std::array::from_fn(|n| n as $t);
+                    assert_eq!(sha3_256::digest(&bincode::encode_to_vec(&arr, bincode::config::standard()).unwrap()),
+                               sha3_256::digest_encode(&arr, bincode::config::standard()).unwrap(),
+                               concat!("[", stringify!($t), "; {}]"), $n);
+                )*
+            };
+        }
+
+        test_case!(u64:
+            00 01 02 03 04 05 06 07 08 09
+            10 11 12 13 14 15 16 17 18 19
+            20 21 22 23 24 25 26 27 28 29
+            30 31 32);
+    }
+
+    #[test]
+    fn test_sha3_256_digest_serialize() {
+        // ensure that sha3_256::digest_serialize gives the same result as serializing the full
+        // object into a buffer and then hashing that
+        macro_rules! test_case {
+            ($t:ty: $($n:literal)*) => {
+                $(
+                    let arr : [$t; $n] = std::array::from_fn(|n| n as $t);
+                    assert_eq!(sha3_256::digest(&bincode::serde::encode_to_vec(&arr, bincode::config::legacy()).unwrap()),
+                               sha3_256::digest_serialize(&arr).unwrap(),
+                               concat!("[", stringify!($t), "; {}]"), $n);
+                )*
+            };
+        }
+
+        test_case!(u64:
+            00 01 02 03 04 05 06 07 08 09
+            10 11 12 13 14 15 16 17 18 19
+            20 21 22 23 24 25 26 27 28 29
+            30 31 32);
     }
 }
