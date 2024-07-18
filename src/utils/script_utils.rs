@@ -2719,8 +2719,6 @@ mod tests {
             t_hash: hex::encode(vec![0, 0, 0]),
             n: 0,
         };
-        let mut key_material = BTreeMap::new();
-        key_material.insert(outpoint.clone(), (pk, sk.clone()));
 
         let tx_outs = vec![];
         let tx_ins = [TxInConstructor::P2PKH {
@@ -2728,7 +2726,7 @@ mod tests {
             public_key: &pk,
             secret_key: &sk,
         }];
-        let tx_ins = update_input_signatures(&tx_ins, &tx_outs, &key_material);
+        let tx_ins = update_input_signatures(&tx_ins, &tx_outs);
         let hash_to_sign = construct_tx_in_out_signable_hash(&tx_ins[0], &tx_outs);
         let tx_out_pk = construct_address(&pk);
 
@@ -2761,9 +2759,7 @@ mod tests {
             public_key: &pk,
             secret_key: &sk,
         }];
-        let tx_ins = update_input_signatures(&tx_ins, &[], &BTreeMap::from([
-            (outpoint.clone(), (pk, sk.clone())),
-        ]));
+        let tx_ins = update_input_signatures(&tx_ins, &[]);
         let tx_out_pk = construct_address(&second_pk);
 
         assert!(!tx_has_valid_p2pkh_sig(

@@ -58,11 +58,9 @@ fn expectation_met(e: &DruidExpectation, tx_source: &BTreeSet<(String, &String, 
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
     use std::vec;
 
     use super::*;
-    use crate::crypto::sign_ed25519::{self as sign};
     use crate::primitives::asset::{Asset, ItemAsset, TokenAmount};
     use crate::primitives::druid::{DdeValues, DruidExpectation};
     use crate::primitives::transaction::*;
@@ -74,11 +72,6 @@ mod tests {
         let tx_input = [];
         let from_addr = construct_tx_ins_address(&tx_input);
         let tx_input = [];
-
-        let (pk, sk) = sign::gen_keypair();
-        let prev_out = OutPoint::new("t_hash".to_string(), 0);
-        let mut key_material = BTreeMap::new();
-        key_material.insert(prev_out, (pk, sk));
 
         // Alice
         let amount = TokenAmount(10);
@@ -128,7 +121,7 @@ mod tests {
             genesis_hash: None,
         };
         let alice_tx =
-            construct_dde_tx(alice_druid_info, &tx_input, vec![token_tx_out], None, &key_material);
+            construct_dde_tx(alice_druid_info, &tx_input, vec![token_tx_out], None);
 
         let bob_druid_info = DdeValues {
             druid: druid.clone(),
@@ -136,7 +129,7 @@ mod tests {
             expectations: expects.clone(),
             genesis_hash: None,
         };
-        let bob_tx = construct_dde_tx(bob_druid_info, &tx_input, vec![data_tx_out], None, &key_material);
+        let bob_tx = construct_dde_tx(bob_druid_info, &tx_input, vec![data_tx_out], None);
 
         vec![alice_tx, bob_tx]
     }
@@ -157,17 +150,12 @@ mod tests {
         let bob_addr = "00000".to_owned();
 
         let sender_address_excess = "11112".to_owned();
-        let mut key_material = BTreeMap::new();
 
         // Act
         //
         let send_tx = {
             let excess_tx_out =
                 TxOut::new_token_amount(sender_address_excess, amount - payment, None);
-            
-            let (pk, sk) = sign::gen_keypair();
-            let prev_out = OutPoint::new("t_hash".to_string(), 0);
-            key_material.insert(prev_out, (pk, sk));
 
             let expectation = DruidExpectation {
                 from: from_addr.clone(),
@@ -192,7 +180,6 @@ mod tests {
                 },
                 0,
                 druid_info,
-                &key_material,
             );
 
             tx.outputs.push(excess_tx_out);
@@ -215,7 +202,7 @@ mod tests {
             };
 
             // create the sender that match the receiver.
-            construct_rb_receive_payment_tx(&tx_input, Vec::new(), None, alice_addr, 0, druid_info, &key_material)
+            construct_rb_receive_payment_tx(&tx_input, Vec::new(), None, alice_addr, 0, druid_info)
         };
 
         (send_tx, recv_tx)
