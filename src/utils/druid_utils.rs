@@ -6,7 +6,7 @@ use crate::primitives::transaction::Transaction;
 use crate::utils::transaction_utils::construct_tx_ins_address;
 use std::collections::BTreeSet;
 use std::iter::Extend;
-use crate::primitives::address::AnyAddress;
+use crate::primitives::address::{AnyAddress, TxInsAddress};
 
 /// Verifies that all DDE transaction expectations are met for DRUID-matching transactions
 ///
@@ -36,7 +36,7 @@ pub fn druid_expectations_are_met<'a>(
                 for out in &tx.outputs {
                     // TODO: jrabil: the original code here skipped over outputs with a None
                     //               script_public_key, should we continue doing that for Burn?
-                    tx_source.insert((ins.clone(), &out.script_public_key, &out.value));
+                    tx_source.insert((ins, &out.script_public_key, &out.value));
                 }
                 info!("Tx Source: {:?}", tx_source);
             }
@@ -53,8 +53,8 @@ pub fn druid_expectations_are_met<'a>(
 ///
 /// * `e`           - The expectation to check on
 /// * `tx_source`   - The source transaction source to match against
-fn expectation_met(e: &DruidExpectation, tx_source: &BTreeSet<(String, &AnyAddress, &Asset)>) -> bool {
-    tx_source.get(&(e.from.clone(), &e.to, &e.asset)).is_some()
+fn expectation_met(e: &DruidExpectation, tx_source: &BTreeSet<(TxInsAddress, &AnyAddress, &Asset)>) -> bool {
+    tx_source.get(&(e.from.parse().expect(&e.from), &e.to, &e.asset)).is_some()
 }
 
 #[cfg(test)]
@@ -111,12 +111,12 @@ mod tests {
         // Expectations (from addresses the same due to empty TxIn)
         let expects = vec![
             DruidExpectation {
-                from: from_addr.clone(),
+                from: from_addr.to_string(),
                 to: bob_addr,
                 asset: alice_asset,
             },
             DruidExpectation {
-                from: from_addr,
+                from: from_addr.to_string(),
                 to: alice_addr,
                 asset: bob_asset,
             },
@@ -175,7 +175,7 @@ mod tests {
             key_material.insert(prev_out, (pk, sk));
 
             let expectation = DruidExpectation {
-                from: from_addr.clone(),
+                from: from_addr.to_string(),
                 to: alice_addr.clone(),
                 asset: Asset::item(1, Some("genesis_hash".to_owned()), None),
             };
@@ -212,7 +212,7 @@ mod tests {
                 construct_payment_tx_ins(tx_ins_constructor)
             };
             let expectation = DruidExpectation {
-                from: from_addr,
+                from: from_addr.to_string(),
                 to: bob_addr,
                 asset: Asset::Token(payment),
             };

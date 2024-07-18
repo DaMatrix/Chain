@@ -8,7 +8,7 @@ use crate::script::lang::Script;
 use crate::script::StackEntry;
 use std::collections::BTreeMap;
 use tracing::debug;
-use crate::primitives::address::{AnyAddress, P2PKHAddress};
+use crate::primitives::address::{AnyAddress, P2PKHAddress, TxInsAddress};
 
 pub struct ReceiverInfo {
     pub address: AnyAddress,
@@ -88,7 +88,7 @@ pub fn construct_tx_in_signable_asset_hash(asset: &Asset) -> String {
 /// ### Arguments
 ///
 /// * `entry`   - StackEntry to obtain signable string for
-pub fn get_stack_entry_signable_string(entry: &StackEntry) -> String {
+fn get_stack_entry_signable_string(entry: &StackEntry) -> String {
     match entry {
         StackEntry::Op(op) => format!("Op:{op}"),
         StackEntry::Signature(signature) => {
@@ -133,7 +133,7 @@ pub fn construct_tx_in_out_signable_hash(tx_in: &TxIn, tx_out: &[TxOut]) -> Stri
 /// ### Arguments
 ///
 /// * `stack`   - StackEntry vector
-pub fn get_script_signable_string(stack: &[StackEntry]) -> String {
+fn get_script_signable_string(stack: &[StackEntry]) -> String {
     stack
         .iter()
         .map(get_stack_entry_signable_string)
@@ -146,7 +146,7 @@ pub fn get_script_signable_string(stack: &[StackEntry]) -> String {
 /// ### Arguments
 ///
 /// * `tx_in`   - TxIn value
-pub fn get_tx_in_address_signable_string(tx_in: &TxIn) -> String {
+fn get_tx_in_address_signable_string(tx_in: &TxIn) -> String {
     let out_point_signable_string = match &tx_in.previous_out {
         Some(out_point) => get_out_point_signable_string(out_point),
         None => "null".to_owned(),
@@ -161,13 +161,13 @@ pub fn get_tx_in_address_signable_string(tx_in: &TxIn) -> String {
 /// ### Arguments
 ///
 /// * `tx_ins`   - TxIn collection
-pub fn construct_tx_ins_address(tx_ins: &[TxIn]) -> String {
+pub fn construct_tx_ins_address(tx_ins: &[TxIn]) -> TxInsAddress {
     let signable_tx_ins = tx_ins
         .iter()
         .map(get_tx_in_address_signable_string)
         .collect::<Vec<String>>()
         .join("-");
-    hex::encode(sha3_256::digest(signable_tx_ins.as_bytes()))
+    TxInsAddress::from_hash(sha3_256::digest(signable_tx_ins.as_bytes()))
 }
 
 /// Get all the hash to remove from UTXO set for the utxo_entries
@@ -1125,7 +1125,7 @@ mod tests {
                 TxOut::new_token_amount(sender_address_excess, amount - payment, None);
 
             let expectation = DruidExpectation {
-                from: from_addr.clone(),
+                from: from_addr.to_string(),
                 to: alice_addr.clone(),
                 asset: Asset::item(1, Some("genesis_hash".to_owned()), None),
             };
@@ -1160,7 +1160,7 @@ mod tests {
                 construct_payment_tx_ins(tx_ins_constructor)
             };
             let expectation = DruidExpectation {
-                from: from_addr,
+                from: from_addr.to_string(),
                 to: bob_addr.clone(),
                 asset: Asset::Token(payment),
             };
@@ -1326,7 +1326,7 @@ mod tests {
             .collect();
 
         let expected =
-            "c8b62d379f07602956207ea473ce20d9752d24ad6e6cd43cb042d024d7c6a468".to_owned();
+            "c8b62d379f07602956207ea473ce20d9752d24ad6e6cd43cb042d024d7c6a468".parse().unwrap();
         let actual = construct_tx_ins_address(&tx_ins);
 
         //
