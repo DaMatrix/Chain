@@ -20,7 +20,7 @@ use ring::error;
 use std::collections::{BTreeMap, BTreeSet};
 use std::thread::current;
 use tracing::{debug, error, info, trace};
-use crate::primitives::address::AnyAddress;
+use crate::primitives::address::{AnyAddress, P2PKHAddress};
 
 use super::transaction_utils::construct_p2sh_address;
 
@@ -93,7 +93,7 @@ pub fn tx_is_valid<'a>(
 
         match (tx_out_pk) {
             AnyAddress::P2PKH(address) =>
-                if !tx_has_valid_p2pkh_sig(&tx_in.script_signature, &full_tx_hash, &address.to_string())
+                if !tx_has_valid_p2pkh_sig(&tx_in.script_signature, &full_tx_hash, address)
                     // TODO: jrabil: P2SH    && !tx_has_valid_p2sh_script(&tx_in.script_signature, pk)
                 {
                     error!("INVALID SIGNATURE OR SCRIPT TYPE");
@@ -196,7 +196,11 @@ pub fn tx_has_valid_create_script(script: &Script, asset: &Asset) -> bool {
 /// * `outpoint_hash`   - Hash of the corresponding outpoint
 /// * `tx_out_pub_key`  - Public key of the previous tx_out
 // TODO: The last two operands should be converted to the corresponding types
-fn tx_has_valid_p2pkh_sig(script: &Script, outpoint_hash: &str, tx_out_pub_key: &str) -> bool {
+fn tx_has_valid_p2pkh_sig(
+    script: &Script,
+    outpoint_hash: &str,
+    tx_out_pub_key: &P2PKHAddress,
+) -> bool {
     let mut it = script.stack.iter();
 
     debug!("script: {:?}", script.stack);
@@ -229,7 +233,7 @@ fn tx_has_valid_p2pkh_sig(script: &Script, outpoint_hash: &str, tx_out_pub_key: 
         let h_hex = hex::encode(h);
         let b_hex = hex::encode(b);
 
-        if h_hex == tx_out_pub_key && b_hex == outpoint_hash && script.interpret() {
+        if h_hex == hex::encode(&tx_out_pub_key.get_hash()) && b_hex == outpoint_hash && script.interpret() {
             return true;
         }
     }
@@ -2735,7 +2739,7 @@ mod tests {
         assert!(tx_has_valid_p2pkh_sig(
             &tx_ins[0].script_signature,
             &hash_to_sign,
-            &tx_out_pk
+            &tx_out_pk.parse().expect(&tx_out_pk),
         ));
     }
 
@@ -2764,7 +2768,7 @@ mod tests {
         assert!(!tx_has_valid_p2pkh_sig(
             &tx_ins[0].script_signature,
             &hash_to_sign,
-            &tx_out_pk
+            &tx_out_pk.parse().expect(&tx_out_pk),
         ));
     }
 
@@ -2801,7 +2805,7 @@ mod tests {
         assert!(!tx_has_valid_p2pkh_sig(
             &tx_ins[0].script_signature,
             &hash_to_sign,
-            &tx_out_pk
+            &tx_out_pk.parse().expect(&tx_out_pk),
         ));
     }
 
@@ -2842,7 +2846,7 @@ mod tests {
         assert!(!tx_has_valid_p2pkh_sig(
             &tx_ins[0].script_signature,
             &hash_to_sign,
-            &tx_out_pk
+            &tx_out_pk.parse().expect(&tx_out_pk),
         ));
     }
 
