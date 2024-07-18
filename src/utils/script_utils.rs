@@ -2786,7 +2786,7 @@ mod tests {
 
         let tx_outs = vec![];
         let mut tx_ins = construct_payment_tx_ins(vec![tx_const]);
-        tx_ins = update_input_signatures(&tx_ins, &tx_outs, &key_material);
+        tx_ins = update_input_signatures(&crate::utils::transaction_utils::tx_ins_to_p2pkh_constructors(&tx_ins, &key_material), &tx_outs, &key_material);
           
         let hash_to_sign = construct_tx_in_out_signable_hash(&tx_ins[0], &tx_outs);
         let tx_out_pk = construct_address_for(&pk, address_version);

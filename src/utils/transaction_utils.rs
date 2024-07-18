@@ -1,5 +1,5 @@
 use crate::constants::*;
-use crate::crypto::sha3_256;
+use crate::crypto::{sha3_256, sign_ed25519};
 use crate::crypto::sign_ed25519::{self as sign, sign_detached, PublicKey, SecretKey};
 use crate::primitives::asset::Asset;
 use crate::primitives::druid::{DdeValues, DruidExpectation};
@@ -367,14 +367,14 @@ pub fn construct_create_tx_in(
     asset: &Asset,
     public_key: PublicKey,
     secret_key: &SecretKey,
-) -> Vec<TxIn> {
+) -> TxIn {
     let asset_hash = construct_tx_in_signable_asset_hash(asset);
     let signature = sign::sign_detached(asset_hash.as_bytes(), secret_key);
 
-    vec![TxIn {
+    TxIn {
         previous_out: None,
         script_signature: Script::new_create_asset(block_num, asset_hash, signature, public_key),
-    }]
+    }
 }
 
 /// Constructs a item data asset for use in accepting payments
@@ -399,7 +399,7 @@ pub fn construct_item_create_tx(
     let asset = Asset::item(amount, genesis_hash, metadata);
     let receiver_address = construct_address(&public_key);
 
-    let tx_ins = construct_create_tx_in(block_num, &asset, public_key, secret_key);
+    let tx_ins = vec![construct_create_tx_in(block_num, &asset, public_key, secret_key)];
     let tx_out = TxOut {
         value: asset,
         script_public_key: Some(receiver_address),
@@ -434,7 +434,7 @@ pub fn construct_payment_tx(
         script_public_key: Some(receiver.address),
     };
     let tx_outs = vec![tx_out];
-    let final_tx_ins = update_input_signatures(&tx_ins, &tx_outs, key_material);
+    let final_tx_ins = update_input_signatures(&tx_ins_to_p2pkh_constructors(&tx_ins, key_material), &tx_outs, key_material);
 
     construct_tx_core(final_tx_ins, tx_outs, fee)
 }
@@ -464,7 +464,7 @@ pub fn construct_p2sh_tx(
         script_public_key: Some(script_hash),
     };
     let tx_outs = vec![tx_out];
-    let final_tx_ins = update_input_signatures(&tx_ins, &tx_outs, key_material);
+    let final_tx_ins = update_input_signatures(&tx_ins_to_p2pkh_constructors(&tx_ins, key_material), &tx_outs, key_material);
 
     construct_tx_core(final_tx_ins, tx_outs, fee)
 }
@@ -474,7 +474,11 @@ pub fn construct_p2sh_tx(
 /// ### Arguments
 ///
 /// * `tx_ins`  - Input/s to pay from
-pub fn construct_burn_tx(tx_ins: Vec<TxIn>, fee: Option<ReceiverInfo>, key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>) -> Transaction {
+pub fn construct_burn_tx(
+    tx_ins: Vec<TxIn>,
+    fee: Option<ReceiverInfo>,
+    key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>,
+) -> Transaction {
     let s = vec![StackEntry::Op(OpCodes::OP_BURN)];
     let script = Script::from(s);
     let script_hash = construct_p2sh_address(&script);
@@ -485,7 +489,7 @@ pub fn construct_burn_tx(tx_ins: Vec<TxIn>, fee: Option<ReceiverInfo>, key_mater
     };
     let tx_outs = vec![tx_out];
 
-    let final_tx_ins = update_input_signatures(&tx_ins, &tx_outs, key_material);
+    let final_tx_ins = update_input_signatures(&tx_ins_to_p2pkh_constructors(&tx_ins, key_material), &tx_outs, key_material);
 
     construct_tx_core(final_tx_ins, tx_outs, fee)
 }
@@ -544,7 +548,7 @@ pub fn construct_rb_tx_core(
 ) -> Transaction {
     let mut tx = construct_tx_core(tx_ins, tx_outs, fee);
 
-    tx.inputs = update_input_signatures(&tx.inputs, &tx.outputs, key_material);
+    tx.inputs = update_input_signatures(&tx_ins_to_p2pkh_constructors(&tx.inputs, key_material), &tx.outputs, key_material);
 
     tx.druid_info = Some(DdeValues {
         druid,
@@ -557,38 +561,80 @@ pub fn construct_rb_tx_core(
 }
 
 /// Updates the input signatures with output information
+///
+/// ### Arguments
+///
+/// * `tx_ins`          - Inputs to the transaction
+/// * `tx_outs`         - Outputs of the transaction
+/// * `key_material`    - Key material for signing
+pub(crate) fn tx_ins_to_p2pkh_constructors<'a>(
+    tx_ins: &'a Vec<TxIn>,
+    key_material: &'a BTreeMap<OutPoint, (PublicKey, SecretKey)>,
+) -> Vec<TxInConstructor<'a>> {
+    tx_ins.iter()
+        .map(|tx_in| {
+            assert!(tx_in.script_signature.stack.is_empty());
+
+            let (pk, sk) = key_material.get(tx_in.previous_out.as_ref().unwrap()).unwrap();
+            TxInConstructor::P2PKH {
+                previous_out: tx_in.previous_out.as_ref().unwrap(),
+                public_key: pk,
+                secret_key: sk,
+            }
+        })
+        .collect()
+}
+
+/// Updates the input signatures with output information
 /// 
 /// ### Arguments
 /// 
 /// * `tx_ins`          - Inputs to the transaction
 /// * `tx_outs`         - Outputs of the transaction
 /// * `key_material`    - Key material for signing
-pub fn update_input_signatures(tx_ins: &[TxIn], tx_outs: &[TxOut], key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>) -> Vec<TxIn> {
-    let mut tx_ins = tx_ins.to_vec();
-    for tx_in in tx_ins.iter_mut() {
-        let signable_prev_out = TxIn {
-            previous_out: tx_in.previous_out.clone(),
-            script_signature: Script::new(),
-        };
-        let signable_hash = construct_tx_in_out_signable_hash(&signable_prev_out, tx_outs);
-        let previous_out = signable_prev_out.previous_out;
+pub fn update_input_signatures(
+    tx_ins: &[TxInConstructor],
+    tx_outs: &[TxOut],
+    key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>,
+) -> Vec<TxIn> {
+    tx_ins.iter()
+        .map(|tx_in_ctor| construct_tx_in(tx_in_ctor, tx_outs))
+        .collect()
+}
 
-        if previous_out.is_some() && key_material.get(&previous_out.clone().unwrap()).is_some() {
-            let pk = key_material.get(&previous_out.clone().unwrap()).unwrap().0;
-            let sk = &key_material.get(&previous_out.unwrap()).unwrap().1;
-    
-            let script_signature = Script::pay2pkh(
-                signable_hash.clone(),
-                sign_detached(signable_hash.as_bytes(), sk),
-                pk,
-                None,
-            );
-    
-            tx_in.script_signature = script_signature;
+/// Updates the input signature with output information
+///
+/// ### Arguments
+///
+/// * `tx_in`           - Input to the transaction
+/// * `tx_outs`         - Outputs of the transaction
+fn construct_tx_in(
+    ctor: &TxInConstructor,
+    tx_outs: &[TxOut],
+) -> TxIn {
+    match *ctor {
+        TxInConstructor::Coinbase { .. } => todo!("Coinbase"),
+        TxInConstructor::Create { block_number, asset, public_key, secret_key } =>
+            construct_create_tx_in(block_number, asset, *public_key, secret_key),
+        TxInConstructor::P2PKH { previous_out, public_key, secret_key } => {
+            let signable_prev_out = TxIn {
+                previous_out: Some(previous_out.clone()),
+                script_signature: Script::new(),
+            };
+            let signable_hash = construct_tx_in_out_signable_hash(&signable_prev_out, tx_outs);
+            let signature = sign_ed25519::sign_detached(signable_hash.as_bytes(), secret_key);
+
+            TxIn {
+                previous_out: Some(previous_out.clone()),
+                script_signature: Script::pay2pkh(
+                    signable_hash,
+                    signature,
+                    *public_key,
+                    None,
+                ),
+            }
         }
     }
-
-    tx_ins
 }
 
 /// Constructs the "send" half of a item-based payment
@@ -724,7 +770,7 @@ pub fn construct_dde_tx(
 ) -> Transaction {
     let mut tx = construct_tx_core(tx_ins, tx_outs, fee);
 
-    tx.inputs = update_input_signatures(&tx.inputs, &tx.outputs, key_material);
+    tx.inputs = update_input_signatures(&tx_ins_to_p2pkh_constructors(&tx.inputs, key_material), &tx.outputs, key_material);
     tx.druid_info = Some(druid_info);
 
     tx
@@ -1061,7 +1107,7 @@ mod tests {
 
 
         let tx_1 = TxConstructor {
-            previous_out: OutPoint::new("".to_string(), 0),
+            previous_out: prev_out.clone(),
             address_version,
         };
 
