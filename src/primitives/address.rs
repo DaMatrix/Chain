@@ -135,6 +135,24 @@ impl TxInsAddress {
     }
 }
 
+impl Serialize for TxInsAddress {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // TODO: jrabil: re-enable this once refactor/addresses-usages is merged
+        //assert!(serializer.is_human_readable(), "serializer must be human-readable!");
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for TxInsAddress {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // TODO: jrabil: re-enable this once refactor/addresses-usages is merged
+        //assert!(deserializer.is_human_readable(), "deserializer must be human-readable!");
+
+        let text : String = serde::Deserialize::deserialize(deserializer)?;
+        text.parse().map_err(<D::Error as serde::de::Error>::custom)
+    }
+}
+
 /// Wrapper enum representing an address of any type.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Encode, Decode)]
 pub enum AnyAddress {

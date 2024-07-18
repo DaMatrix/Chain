@@ -1063,11 +1063,7 @@ mod tests {
             script_public_key: to_address.clone(),
         }];
 
-        let bytes = match bincode::serde::encode_to_vec(&tx_ins, bincode::config::legacy()) {
-            Ok(bytes) => bytes,
-            Err(_) => vec![],
-        };
-        let from_addr = hex::encode(bytes);
+        let from_addr = construct_tx_ins_address(&tx_ins);
 
         // DDE params
         let druid = hex::encode(vec![1, 2, 3, 4, 5]);
@@ -1125,7 +1121,7 @@ mod tests {
                 TxOut::new_token_amount(sender_address_excess, amount - payment, None);
 
             let expectation = DruidExpectation {
-                from: from_addr.to_string(),
+                from: from_addr,
                 to: alice_addr.clone(),
                 asset: Asset::item(1, Some("genesis_hash".to_owned()), None),
             };
@@ -1160,7 +1156,7 @@ mod tests {
                 construct_payment_tx_ins(tx_ins_constructor)
             };
             let expectation = DruidExpectation {
-                from: from_addr.to_string(),
+                from: from_addr,
                 to: bob_addr.clone(),
                 asset: Asset::Token(payment),
             };
