@@ -3,7 +3,7 @@ pub use ring;
 macro_rules! fixed_bytes_wrapper {
     ($vis:vis struct $name:ident, $n:expr, $doc:literal) => {
         #[doc = $doc]
-        #[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
+        #[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize, bincode::Encode, bincode::Decode)]
         $vis struct $name(crate::utils::serialize_utils::FixedByteArray<$n>);
 
         impl $name {
@@ -327,9 +327,20 @@ pub mod sha3_256 {
     /// ### Arguments
     ///
     /// * `value`  - the value to serialize and hash
-    pub fn digest_serialize<S: serde::Serialize>(value: &S) -> bincode::Result<Hash> {
+    pub fn digest_encode<S: bincode::Encode, C: bincode::config::Config>(value: &S, config: C) -> Result<Hash, bincode::error::EncodeError> {
         let mut hasher = Sha3_256::new();
-        bincode::serialize_into(&mut hasher, value)?;
+        bincode::encode_into_std_write(value, &mut hasher, config)?;
+        Ok(Hash(hasher.finalize().try_into().unwrap()))
+    }
+
+    /// Serializes the given value using bincode-serde and computes the SHA3-256 hash of the result.
+    ///
+    /// ### Arguments
+    ///
+    /// * `value`  - the value to serialize and hash
+    pub fn digest_serialize<S: serde::Serialize>(value: &S) -> Result<Hash, bincode::error::EncodeError> {
+        let mut hasher = Sha3_256::new();
+        bincode::serde::encode_into_std_write(value, &mut hasher, bincode::config::legacy())?;
         Ok(Hash(hasher.finalize().try_into().unwrap()))
     }
 }
@@ -422,6 +433,28 @@ mod test {
     }
 
     #[test]
+    fn test_sha3_256_digest_encode() {
+        // ensure that sha3_256::digest_encode gives the same result as encoding the full
+        // object into a buffer and then hashing that
+        macro_rules! test_case {
+            ($t:ty: $($n:literal)*) => {
+                $(
+                    let arr : [$t; $n] = std::array::from_fn(|n| n as $t);
+                    assert_eq!(sha3_256::digest(&bincode::encode_to_vec(&arr, bincode::config::standard()).unwrap()),
+                               sha3_256::digest_encode(&arr, bincode::config::standard()).unwrap(),
+                               concat!("[", stringify!($t), "; {}]"), $n);
+                )*
+            };
+        }
+
+        test_case!(u64:
+            00 01 02 03 04 05 06 07 08 09
+            10 11 12 13 14 15 16 17 18 19
+            20 21 22 23 24 25 26 27 28 29
+            30 31 32);
+    }
+
+    #[test]
     fn test_sha3_256_digest_serialize() {
         // ensure that sha3_256::digest_serialize gives the same result as serializing the full
         // object into a buffer and then hashing that
@@ -429,7 +462,7 @@ mod test {
             ($t:ty: $($n:literal)*) => {
                 $(
                     let arr : [$t; $n] = std::array::from_fn(|n| n as $t);
-                    assert_eq!(sha3_256::digest(&bincode::serialize(&arr).unwrap()),
+                    assert_eq!(sha3_256::digest(&bincode::serde::encode_to_vec(&arr, bincode::config::legacy()).unwrap()),
                                sha3_256::digest_serialize(&arr).unwrap(),
                                concat!("[", stringify!($t), "; {}]"), $n);
                 )*
