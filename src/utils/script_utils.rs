@@ -20,6 +20,7 @@ use ring::error;
 use std::collections::{BTreeMap, BTreeSet};
 use std::thread::current;
 use tracing::{debug, error, info, trace};
+use crate::primitives::address::AnyAddress;
 
 use super::transaction_utils::construct_p2sh_address;
 
@@ -84,22 +85,21 @@ pub fn tx_is_valid<'a>(
         }
 
         // At this point `TxIn` will be valid
-        let tx_out_pk = tx_out.script_public_key.as_ref();
+        let tx_out_pk = &tx_out.script_public_key;
         let tx_out_hash = construct_tx_in_signable_hash(tx_out_point);
         let full_tx_hash = construct_tx_in_out_signable_hash(tx_in, &tx.outputs);
 
         debug!("full_tx_hash: {:?}", full_tx_hash);
 
-        if let Some(pk) = tx_out_pk {
-            // Check will need to include other signature types here
-            if !tx_has_valid_p2pkh_sig(&tx_in.script_signature, &full_tx_hash, pk)
-                // TODO: jrabil: P2SH    && !tx_has_valid_p2sh_script(&tx_in.script_signature, pk)
-            {
-                error!("INVALID SIGNATURE OR SCRIPT TYPE");
-                return false;
-            }
-        } else {
-            return false;
+        match (tx_out_pk) {
+            AnyAddress::P2PKH(address) =>
+                if !tx_has_valid_p2pkh_sig(&tx_in.script_signature, &full_tx_hash, &address.to_string())
+                    // TODO: jrabil: P2SH    && !tx_has_valid_p2sh_script(&tx_in.script_signature, pk)
+                {
+                    error!("INVALID SIGNATURE OR SCRIPT TYPE");
+                    return false;
+                }
+            _ => return false,
         }
 
         let asset = tx_out.value.clone().with_fixed_hash(tx_out_point);
@@ -127,27 +127,11 @@ pub fn tx_outs_are_valid(tx_outs: &[TxOut], fees: &[TxOut], tx_ins_spent: AssetV
     let mut tx_outs_spent: AssetValues = Default::default();
 
     for tx_out in tx_outs {
-        // Addresses must have valid length
-        if let Some(addr) = &tx_out.script_public_key {
-            if !address_has_valid_length(addr) {
-                trace!("Address has invalid length");
-                return false;
-            }
-        }
-
         tx_outs_spent.update_add(&tx_out.value);
     }
 
     // Check fees as well
     for fee in fees {
-        // Addresses must have valid length
-        if let Some(addr) = &fee.script_public_key {
-            if !address_has_valid_length(addr) {
-                trace!("Address has invalid length");
-                return false;
-            }
-        }
-
         tx_outs_spent.update_add(&fee.value);
     }
 
@@ -310,6 +294,7 @@ mod tests {
 
     use super::*;
     use crate::constants::ITEM_ACCEPT_VAL;
+    use crate::primitives::address::P2PKHAddress;
     use crate::primitives::asset::Asset;
     use crate::primitives::druid::DdeValues;
     use crate::primitives::transaction::OutPoint;
@@ -2916,9 +2901,9 @@ mod tests {
         let (pk, sk) = sign::gen_keypair();
         let tx_hash = hex::encode(vec![0, 0, 0]);
         let tx_outpoint = OutPoint::new(tx_hash, 0);
-        let script_public_key = construct_address(&pk);
+        let script_public_key = P2PKHAddress::from_pubkey(&pk);
         let tx_in_previous_out =
-            TxOut::new_token_amount(script_public_key.clone(), TokenAmount(5), locktime);
+            TxOut::new_token_amount(script_public_key.wrap(), TokenAmount(5), locktime);
         let ongoing_tx_outs = vec![tx_in_previous_out.clone()];
         let tx_in = TxIn {
             script_signature: Script::new(),
@@ -2938,7 +2923,7 @@ mod tests {
                     StackEntry::PubKey(pk),
                     StackEntry::Op(OpCodes::OP_DUP),
                     StackEntry::Op(op_hash256),
-                    StackEntry::Bytes(hex::decode(script_public_key).unwrap()),
+                    StackEntry::Bytes(script_public_key.get_hash().to_vec()),
                     StackEntry::Op(OpCodes::OP_EQUALVERIFY),
                     StackEntry::Op(OpCodes::OP_CHECKSIG),
                 ],

@@ -181,14 +181,16 @@ impl FromStr for AnyAddress {
 
 impl Serialize for AnyAddress {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        assert!(serializer.is_human_readable(), "serializer must be human-readable!");
+        // TODO: jrabil: re-enable this once refactor/addresses-usages is merged
+        //assert!(serializer.is_human_readable(), "serializer must be human-readable!");
         serializer.serialize_str(&self.to_string())
     }
 }
 
 impl<'de> Deserialize<'de> for AnyAddress {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        assert!(deserializer.is_human_readable(), "deserializer must be human-readable!");
+        // TODO: jrabil: re-enable this once refactor/addresses-usages is merged
+        //assert!(deserializer.is_human_readable(), "deserializer must be human-readable!");
 
         let text : String = serde::Deserialize::deserialize(deserializer)?;
         text.parse().map_err(<D::Error as serde::de::Error>::custom)

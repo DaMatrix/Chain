@@ -10,6 +10,7 @@ use crate::script::{OpCodes, StackEntry};
 use crate::utils::is_valid_amount;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use crate::primitives::address::AnyAddress;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GenesisTxHashSpec {
@@ -121,35 +122,43 @@ impl TxIn {
 pub struct TxOut {
     pub value: Asset,
     pub locktime: u64,
-    pub script_public_key: Option<String>,
+    pub script_public_key: AnyAddress,
 }
 
 impl TxOut {
     pub fn new_token_amount(
-        to_address: String,
+        to_address: AnyAddress,
         amount: TokenAmount,
         locktime: Option<u64>,
     ) -> TxOut {
         TxOut {
             value: Asset::Token(amount),
             locktime: locktime.unwrap_or(ZERO as u64),
-            script_public_key: Some(to_address),
+            script_public_key: to_address,
         }
     }
 
     /// Creates a new TxOut instance for a `Item` asset
     ///
     /// **NOTE:** Only create transactions may have `Item` assets that have a `None` `genesis_hash`
-    pub fn new_item_amount(to_address: String, item: ItemAsset, locktime: Option<u64>) -> TxOut {
+    pub fn new_item_amount(
+        to_address: AnyAddress,
+        item: ItemAsset,
+        locktime: Option<u64>,
+    ) -> TxOut {
         TxOut {
             value: Asset::Item(item),
             locktime: locktime.unwrap_or(ZERO as u64),
-            script_public_key: Some(to_address),
+            script_public_key: to_address,
         }
     }
 
     //TODO: Add handling for `Data' asset variant
-    pub fn new_asset(to_address: String, asset: Asset, locktime: Option<u64>) -> TxOut {
+    pub fn new_asset(
+        to_address: AnyAddress,
+        asset: Asset,
+        locktime: Option<u64>,
+    ) -> TxOut {
         match asset {
             Asset::Token(amount) => TxOut::new_token_amount(to_address, amount, locktime),
             Asset::Item(item) => TxOut::new_item_amount(to_address, item, locktime),

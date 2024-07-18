@@ -5,9 +5,10 @@ use crate::primitives::asset::Asset;
 use crate::primitives::druid::{DdeValues, DruidExpectation};
 use crate::primitives::transaction::*;
 use crate::script::lang::Script;
-use crate::script::{OpCodes, StackEntry};
+use crate::script::StackEntry;
 use std::collections::BTreeMap;
 use tracing::debug;
+use crate::primitives::address::{AnyAddress, P2PKHAddress};
 
 pub struct ReceiverInfo {
     pub address: String,
@@ -329,13 +330,12 @@ pub fn construct_item_create_tx(
 ) -> Transaction {
     let genesis_hash = genesis_hash_spec.get_genesis_hash();
     let asset = Asset::item(amount, genesis_hash, metadata);
-    let receiver_address = construct_address(&public_key);
 
     let tx_ins = construct_create_tx_in(block_num, &asset, public_key, secret_key);
     let tx_out = TxOut {
         value: asset,
         locktime: 0,
-        script_public_key: Some(receiver_address),
+        script_public_key: P2PKHAddress::from_pubkey(&public_key).wrap(),
     };
 
     construct_tx_core(tx_ins, vec![tx_out], fee)
@@ -363,7 +363,7 @@ pub fn construct_payment_tx(
     let tx_out = TxOut {
         value: receiver.asset,
         locktime,
-        script_public_key: Some(receiver.address),
+        script_public_key: receiver.address.parse().expect(&receiver.address),
     };
     let tx_outs = vec![tx_out];
     let final_tx_ins = update_input_signatures(&tx_ins, &tx_outs, key_material);
@@ -409,14 +409,11 @@ pub fn construct_p2sh_tx(
 ///
 /// * `tx_ins`  - Input/s to pay from
 pub fn construct_burn_tx(tx_ins: Vec<TxIn>, fee: Option<ReceiverInfo>, key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>) -> Transaction {
-    let s = vec![StackEntry::Op(OpCodes::OP_BURN)];
-    let script = Script::from(s);
-    let script_hash = construct_p2sh_address(&script);
-
     let tx_out = TxOut {
+        // TODO: jrabil: The value here should actually be the sum of the input values
         value: Default::default(),
         locktime: 0,
-        script_public_key: Some(script_hash),
+        script_public_key: AnyAddress::Burn,
     };
     let tx_outs = vec![tx_out];
 
@@ -446,7 +443,7 @@ pub fn construct_tx_core(
         Some(fee) => vec![TxOut {
             value: fee.asset,
             locktime: 0,
-            script_public_key: Some(fee.address),
+            script_public_key: fee.address.parse().expect(&fee.address),
         }],
         None => vec![],
     };
@@ -545,7 +542,7 @@ pub fn construct_rb_payments_send_tx(
     let out = TxOut {
         value: receiver.asset,
         locktime,
-        script_public_key: Some(receiver.address),
+        script_public_key: receiver.address.parse().expect(&receiver.address),
     };
     tx_outs.push(out);
     construct_rb_tx_core(
@@ -574,7 +571,7 @@ pub fn construct_rb_receive_payment_tx(
     tx_ins: Vec<TxIn>,
     mut tx_outs: Vec<TxOut>,
     fee: Option<ReceiverInfo>,
-    sender_address: String,
+    sender_address: AnyAddress,
     locktime: u64,
     druid_info: DdeValues,
     key_material: &BTreeMap<OutPoint, (PublicKey, SecretKey)>
@@ -582,7 +579,7 @@ pub fn construct_rb_receive_payment_tx(
     let out = TxOut {
         value: Asset::item(1, druid_info.genesis_hash, None),
         locktime,
-        script_public_key: Some(sender_address),
+        script_public_key: sender_address,
     };
     tx_outs.push(out);
     construct_rb_tx_core(
@@ -672,7 +669,9 @@ pub fn construct_dde_tx(
 mod tests {
     use super::*;
     use crate::crypto::sign_ed25519::{self as sign, Signature};
+    use crate::primitives::address::P2PKHAddress;
     use crate::primitives::asset::{AssetValues, ItemAsset, TokenAmount};
+    use crate::utils::{Placeholder, PlaceholderSeed};
     use crate::utils::script_utils::tx_outs_are_valid;
 
     fn test_construct_valid_inputs() -> (Vec<TxIn>, String, BTreeMap<OutPoint, (PublicKey, SecretKey)>) {
@@ -790,10 +789,11 @@ mod tests {
         let (tx_ins, _drs_block_hash, key_material) = test_construct_valid_inputs();
 
         let token_amount = TokenAmount(400000);
+        let address = AnyAddress::placeholder();
         let payment_tx = construct_payment_tx(
             tx_ins,
             ReceiverInfo {
-                address: hex::encode(vec![0; 32]),
+                address: address.to_string(),
                 asset: Asset::Token(token_amount),
             },
             None,
@@ -803,7 +803,7 @@ mod tests {
         assert_eq!(Asset::Token(token_amount), payment_tx.outputs[0].value);
         assert_eq!(
             payment_tx.outputs[0].script_public_key,
-            Some(hex::encode(vec![0; 32]))
+            address
         );
     }
 
@@ -977,6 +977,7 @@ mod tests {
         let mut key_material = BTreeMap::new();
         key_material.insert(prev_out.clone(), (pk, sk.clone()));
 
+        let addr = AnyAddress::placeholder();
 
         let tx_1 = TxConstructor {
             previous_out: OutPoint::new("".to_string(), 0),
@@ -989,7 +990,7 @@ mod tests {
         let payment_tx_1 = construct_payment_tx(
             tx_ins_1,
             ReceiverInfo {
-                address: hex::encode(vec![0; 32]),
+                address: addr.to_string(),
                 asset: Asset::Token(token_amount),
             },
             None,
@@ -1008,7 +1009,7 @@ mod tests {
         };
         let tx_ins_2 = construct_payment_tx_ins(vec![tx_2]);
         let tx_outs = vec![TxOut::new_token_amount(
-            hex::encode(vec![0; 32]),
+            addr,
             token_amount,
             None,
         )];
@@ -1040,7 +1041,7 @@ mod tests {
         let mut key_material = BTreeMap::new();
         key_material.insert(prev_out.clone(), (pk, sk));
 
-        let to_asset = "2222".to_owned();
+        let to_address = P2PKHAddress::placeholder_seed("to").wrap();
         let data = Asset::Item(ItemAsset {
             metadata: Some("hello".to_string()),
             amount: 1,
@@ -1057,7 +1058,7 @@ mod tests {
         let tx_outs = vec![TxOut {
             value: data.clone(),
             locktime: 0,
-            script_public_key: Some(to_asset.clone()),
+            script_public_key: to_address.clone(),
         }];
 
         let bytes = match bincode::serde::encode_to_vec(&tx_ins, bincode::config::legacy()) {
@@ -1071,7 +1072,7 @@ mod tests {
         let participants = 2;
         let expects = vec![DruidExpectation {
             from: from_addr,
-            to: to_asset,
+            to: to_address.to_string(),
             asset: data.clone(),
         }];
 
@@ -1101,10 +1102,10 @@ mod tests {
         let tx_input = construct_payment_tx_ins(vec![]);
         let from_addr = construct_tx_ins_address(&tx_input);
 
-        let alice_addr = "1111".to_owned();
-        let bob_addr = "00000".to_owned();
+        let alice_addr = P2PKHAddress::placeholder_seed("alice").wrap();
+        let bob_addr = P2PKHAddress::placeholder_seed("bob").wrap();
 
-        let sender_address_excess = "11112".to_owned();
+        let sender_address_excess = P2PKHAddress::placeholder_seed("sender_excess").wrap();
 
         let (pk, sk) = sign::gen_keypair();
         let mut key_material = BTreeMap::new();
@@ -1123,7 +1124,7 @@ mod tests {
 
             let expectation = DruidExpectation {
                 from: from_addr.clone(),
-                to: alice_addr.clone(),
+                to: alice_addr.to_string(),
                 asset: Asset::item(1, Some("genesis_hash".to_owned()), None),
             };
 
@@ -1132,7 +1133,7 @@ mod tests {
                 Vec::new(),
                 None,
                 ReceiverInfo {
-                    address: bob_addr.clone(),
+                    address: bob_addr.to_string(),
                     asset: Asset::Token(payment),
                 },
                 0,
@@ -1158,7 +1159,7 @@ mod tests {
             };
             let expectation = DruidExpectation {
                 from: from_addr,
-                to: bob_addr,
+                to: bob_addr.to_string(),
                 asset: Asset::Token(payment),
             };
 

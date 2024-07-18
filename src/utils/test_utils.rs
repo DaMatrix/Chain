@@ -39,9 +39,9 @@ pub fn generate_tx_with_ins_and_outs_assets(
         let tx_out = match genesis_hash {
             Some(drs) => {
                 let item = Asset::item(*output_amount, Some(drs.to_string()), None);
-                TxOut::new_asset(spk.clone(), item, None)
+                TxOut::new_asset(spk.parse().expect(&spk), item, None)
             }
-            None => TxOut::new_token_amount(spk.clone(), TokenAmount(*output_amount), None),
+            None => TxOut::new_token_amount(spk.parse().expect(&spk), TokenAmount(*output_amount), None),
         };
         tx.outputs.push(tx_out);
     }
@@ -52,9 +52,9 @@ pub fn generate_tx_with_ins_and_outs_assets(
         let tx_in_previous_out = match genesis_hash {
             Some(drs) => {
                 let item = Asset::item(*input_amount, Some(drs.to_string()), md.clone());
-                TxOut::new_asset(spk.clone(), item, None)
+                TxOut::new_asset(spk.parse().expect(&spk), item, None)
             }
-            None => TxOut::new_token_amount(spk.clone(), TokenAmount(*input_amount), None),
+            None => TxOut::new_token_amount(spk.parse().expect(&spk), TokenAmount(*input_amount), None),
         };
         let signable_hash = construct_tx_in_out_signable_hash(
             &TxIn {

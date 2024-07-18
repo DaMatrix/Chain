@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Default, Clone, Debug, Ord, Eq, PartialEq, Serialize, Deserialize, PartialOrd)]
 pub struct DruidExpectation {
     pub from: String,
-    pub to: String,
+    pub to: String, // TODO: Make this an AnyAddress
     pub asset: Asset,
 }
 
