@@ -140,7 +140,8 @@ impl AsRef<[u8]> for TxHash {
 
 impl Serialize for TxHash {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        assert!(serializer.is_human_readable(), "serializer must be human-readable!");
+        // TODO: jrabil: re-enable this once refactor/outpoint-tx-hash is merged with refactor/bincode-2
+        //assert!(serializer.is_human_readable(), "serializer must be human-readable!");
 
         serializer.serialize_str(&self.to_string())
     }
@@ -148,7 +149,8 @@ impl Serialize for TxHash {
 
 impl<'de> Deserialize<'de> for TxHash {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        assert!(deserializer.is_human_readable(), "deserializer must be human-readable!");
+        // TODO: jrabil: re-enable this once refactor/outpoint-tx-hash is merged with refactor/bincode-2
+        //assert!(deserializer.is_human_readable(), "deserializer must be human-readable!");
 
         let text : String = serde::Deserialize::deserialize(deserializer)?;
         text.parse().map_err(<D::Error as serde::de::Error>::custom)
@@ -159,7 +161,7 @@ impl<'de> Deserialize<'de> for TxHash {
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct OutPoint {
     // TODO: jrabil: change this field to TxHash
-    pub t_hash: String,
+    pub t_hash: TxHash,
     pub n: u32,
 }
 
@@ -172,7 +174,7 @@ impl fmt::Display for OutPoint {
 impl OutPoint {
     /// Creates a new outpoint instance
     pub fn new(t_hash: TxHash, n: u32) -> OutPoint {
-        OutPoint { t_hash: t_hash.to_string(), n }
+        OutPoint { t_hash, n }
     }
 }
 
@@ -182,7 +184,7 @@ impl crate::utils::PlaceholderSeed for OutPoint {
         Self {
             t_hash: TxHash::placeholder_seed_parts(
                 ["OutPoint:".as_bytes()].iter().copied().chain(seed_parts)
-            ).to_string(),
+            ),
             n: 0,
         }
     }

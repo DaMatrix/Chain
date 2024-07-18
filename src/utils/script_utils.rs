@@ -2641,7 +2641,7 @@ mod tests {
             new_tx_in.script_signature = Script::multisig_validation(
                 m,
                 entry.pub_keys.len(),
-                entry.previous_out.t_hash.clone(),
+                entry.previous_out.t_hash.to_string(),
                 entry.signatures,
                 entry.pub_keys,
             );
@@ -2660,7 +2660,7 @@ mod tests {
         for entry in tx_values {
             let mut new_tx_in = TxIn::new();
             new_tx_in.script_signature = Script::member_multisig(
-                entry.previous_out.t_hash.clone(),
+                entry.previous_out.t_hash.to_string(),
                 entry.pub_keys[0],
                 entry.signatures[0],
             );
