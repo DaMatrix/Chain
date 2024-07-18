@@ -57,10 +57,7 @@ pub fn generate_tx_with_ins_and_outs_assets(
             None => TxOut::new_token_amount(spk.clone(), TokenAmount(*input_amount), None),
         };
         let signable_hash = construct_tx_in_out_signable_hash(
-            &TxIn {
-                previous_out: Some(tx_previous_out.clone()),
-                script_signature: Script::new(),
-            },
+            &tx_previous_out,
             &tx.outputs,
         );
         let signature = sign::sign_detached(signable_hash.as_bytes(), &sk);
