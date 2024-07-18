@@ -12,7 +12,7 @@ use crate::script::lang::{ConditionStack, Script, Stack};
 use crate::script::{OpCodes, StackEntry};
 use crate::utils::error_utils::*;
 use crate::utils::transaction_utils::{
-    construct_address, construct_tx_hash, construct_tx_in_out_signable_hash,
+    construct_tx_hash, construct_tx_in_out_signable_hash,
     construct_tx_in_signable_asset_hash, construct_tx_in_signable_hash,
 };
 use hex::encode;
@@ -302,6 +302,7 @@ mod tests {
     use crate::primitives::asset::Asset;
     use crate::primitives::druid::DdeValues;
     use crate::primitives::transaction::OutPoint;
+    use crate::utils::Placeholder;
     use crate::utils::test_utils::generate_tx_with_ins_and_outs_assets;
     use crate::utils::transaction_utils::*;
 
@@ -1935,7 +1936,7 @@ mod tests {
         let (pk, sk) = sign::gen_keypair();
         let mut stack = Stack::new();
         stack.push(StackEntry::PubKey(pk));
-        let mut v: Vec<StackEntry> = vec![StackEntry::Bytes(hex::decode(construct_address(&pk)).unwrap())];
+        let mut v: Vec<StackEntry> = vec![StackEntry::Bytes(P2PKHAddress::from_pubkey(&pk).get_hash().to_vec())];
         op_hash256(&mut stack);
         assert_eq!(stack.main_stack, v);
         /// op_hash256([]) -> fail
@@ -2667,8 +2668,7 @@ mod tests {
     #[test]
     /// Checks whether addresses are validated correctly
     fn test_validate_addresses_correctly() {
-        let (pk, _) = sign::gen_keypair();
-        let address = construct_address(&pk);
+        let address = P2PKHAddress::placeholder().to_string();
 
         assert!(address_has_valid_length(&address));
         assert!(address_has_valid_length(&hex::encode([0; 32])));
@@ -2734,12 +2734,12 @@ mod tests {
         tx_ins = update_input_signatures(&tx_ins, &tx_outs, &key_material);
 
         let hash_to_sign = construct_tx_in_out_signable_hash(&tx_ins[0], &tx_outs);
-        let tx_out_pk = construct_address(&pk);
+        let tx_out_pk = P2PKHAddress::from_pubkey(&pk);
 
         assert!(tx_has_valid_p2pkh_sig(
             &tx_ins[0].script_signature,
             &hash_to_sign,
-            &tx_out_pk.parse().expect(&tx_out_pk),
+            &tx_out_pk
         ));
     }
 
@@ -2763,12 +2763,12 @@ mod tests {
         };
 
         let tx_ins = construct_payment_tx_ins(vec![tx_const]);
-        let tx_out_pk = construct_address(&pk);
+        let tx_out_pk = P2PKHAddress::from_pubkey(&pk);
 
         assert!(!tx_has_valid_p2pkh_sig(
             &tx_ins[0].script_signature,
             &hash_to_sign,
-            &tx_out_pk.parse().expect(&tx_out_pk),
+            &tx_out_pk
         ));
     }
 
@@ -2800,12 +2800,12 @@ mod tests {
             tx_ins.push(new_tx_in);
         }
 
-        let tx_out_pk = construct_address(&pk);
+        let tx_out_pk = P2PKHAddress::from_pubkey(&pk);
 
         assert!(!tx_has_valid_p2pkh_sig(
             &tx_ins[0].script_signature,
             &hash_to_sign,
-            &tx_out_pk.parse().expect(&tx_out_pk),
+            &tx_out_pk
         ));
     }
 
@@ -2841,12 +2841,12 @@ mod tests {
             tx_ins.push(new_tx_in);
         }
 
-        let tx_out_pk = construct_address(&pk);
+        let tx_out_pk = P2PKHAddress::from_pubkey(&pk);
 
         assert!(!tx_has_valid_p2pkh_sig(
             &tx_ins[0].script_signature,
             &hash_to_sign,
-            &tx_out_pk.parse().expect(&tx_out_pk),
+            &tx_out_pk
         ));
     }
 

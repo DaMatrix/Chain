@@ -35,8 +35,9 @@ pub fn construct_p2sh_address(script: &Script) -> String {
 /// ### Arguments
 ///
 /// * `pub_key` - A public key to build an address from
-pub fn construct_address(pub_key: &PublicKey) -> String {
-    hex::encode(sha3_256::digest(pub_key.as_ref()))
+#[deprecated = "Use P2PKHAddress::from_pubkey()"]
+pub fn construct_address(pub_key: &PublicKey) -> P2PKHAddress {
+    P2PKHAddress::from_pubkey(pub_key)
 }
 
 /// Constructs signable string for OutPoint
@@ -667,6 +668,7 @@ pub fn construct_dde_tx(
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
     use super::*;
     use crate::crypto::sign_ed25519::{self as sign, Signature};
     use crate::primitives::address::P2PKHAddress;
@@ -1201,28 +1203,21 @@ mod tests {
             "5371832122a8e804fa3520ec6861c3fa554a7f6fb617e6f0768452090207e07c",
             "6e86cc1fc5efbe64c2690efbb966b9fe1957facc497dce311981c68dac88e08c",
             "8b835e00c57ebff6637ec32276f2c6c0df71129c8f0860131a78a4692a0b59dc",
-        ]
-        .iter()
-        .map(|v| hex::decode(v).unwrap())
-        .map(|v| PublicKey::from_slice(&v).unwrap())
-        .collect::<Vec<PublicKey>>();
+        ].map(|t| PublicKey::from_str(t).expect(t));
 
         //
         // Act
         //
-        let actual_pub_addresses: Vec<String> = pub_keys
-            .iter()
-            .map(construct_address)
-            .collect();
+        let actual_pub_addresses = pub_keys.each_ref().map(P2PKHAddress::from_pubkey);
 
         //
         // Assert
         //
-        let expected_pub_addresses = vec![
+        let expected_pub_addresses = [
             "5423e6bd848e0ce5cd794e55235c23138d8833633cd2d7de7f4a10935178457b",
             "77516e2d91606250e625546f86702510d2e893e4a27edfc932fdba03c955cc1b",
             "4cfd64a6692021fc417368a866d33d94e1c806747f61ac85e0b3935e7d5ed925",
-        ];
+        ].map(|t| P2PKHAddress::from_str(t).expect(t));
         assert_eq!(actual_pub_addresses, expected_pub_addresses);
     }
 

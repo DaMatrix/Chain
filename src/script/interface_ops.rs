@@ -8,12 +8,12 @@ use crate::primitives::transaction::*;
 use crate::script::lang::{ConditionStack, Script, Stack};
 use crate::script::{OpCodes, StackEntry};
 use crate::utils::error_utils::*;
-use crate::utils::transaction_utils::construct_address;
 use bytes::Bytes;
 use hex::encode;
 use std::collections::BTreeMap;
 use tracing::{debug, error, info, trace};
 use tracing_subscriber::field::debug;
+use crate::primitives::address::P2PKHAddress;
 
 /*---- FLOW CONTROL OPS ----*/
 
@@ -1976,8 +1976,8 @@ pub fn op_hash256(stack: &mut Stack) -> bool {
             return false;
         }
     };
-    let addr = construct_address(&pk);
-    stack.push(StackEntry::Bytes(hex::decode(addr).unwrap()))
+    let addr = P2PKHAddress::from_pubkey(&pk);
+    stack.push(StackEntry::Bytes(addr.get_hash().to_vec()))
 }
 
 /// OP_CHECKSIG: Pushes ONE onto the stack if the signature is valid, ZERO otherwise

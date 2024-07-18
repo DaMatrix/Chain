@@ -7,10 +7,10 @@ use crate::crypto::sign_ed25519::{
 use crate::script::interface_ops::*;
 use crate::script::{OpCodes, StackEntry};
 use crate::utils::error_utils::*;
-use crate::utils::transaction_utils::construct_address;
 use hex::encode;
 use serde::{Deserialize, Serialize};
 use tracing::{error, warn};
+use crate::primitives::address::P2PKHAddress;
 
 /// Stack for script execution
 #[derive(Clone, Debug, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
@@ -397,8 +397,7 @@ impl Script {
             StackEntry::PubKey(pub_key),
             StackEntry::Op(OpCodes::OP_DUP),
             StackEntry::Op(OpCodes::OP_HASH256),
-            StackEntry::Bytes(hex::decode(construct_address(&pub_key))
-                .expect("address contains non-hex characters?")),
+            StackEntry::Bytes(P2PKHAddress::from_pubkey(&pub_key).get_hash().to_vec()),
             StackEntry::Op(OpCodes::OP_EQUALVERIFY),
             StackEntry::Op(OpCodes::OP_CHECKSIG),
         ];
