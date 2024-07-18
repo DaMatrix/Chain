@@ -1,6 +1,6 @@
 #![allow(unused)]
 use crate::constants::*;
-use crate::crypto::sha3_256;
+use crate::crypto::{sha3_256, sign_ed25519};
 use crate::crypto::sign_ed25519::{
     self as sign, PublicKey, Signature, ED25519_PUBLIC_KEY_LEN, ED25519_SIGNATURE_LEN,
 };
@@ -57,7 +57,7 @@ pub fn tx_is_valid<'a>(
 
     for tx_in in &tx.inputs {
         // Ensure the transaction is in the `UTXO` set
-        let tx_out_point = match tx_in.previous_out.as_ref() {
+        let tx_out_point = match tx_in.find_previous_out() {
             Some(v) => v,
             None => {
                 error!("TRANSACTION DOESN'T CONTAIN PREVIOUS OUTPOINT");
@@ -85,16 +85,16 @@ pub fn tx_is_valid<'a>(
 
         debug!("full_tx_hash: {:?}", full_tx_hash);
 
-        if let Some(pk) = tx_out_pk {
-            // Check will need to include other signature types here
-            if !tx_has_valid_p2pkh_sig(&tx_in.script_signature, &full_tx_hash, pk)
-                // TODO: jrabil: P2SH    && !tx_has_valid_p2sh_script(&tx_in.script_signature, pk)
-            {
-                error!("INVALID SIGNATURE OR SCRIPT TYPE");
-                return false;
-            }
-        } else {
-            return false;
+        match (tx_out_pk, tx_in) {
+            (Some(pk), TxIn::P2PKH(tx_in)) => {
+                if !tx_has_valid_p2pkh_sig(tx_in, &full_tx_hash, pk)
+                    // TODO: jrabil: P2SH    && !tx_has_valid_p2sh_script(&tx_in.script_signature, pk)
+                {
+                    error!("INVALID SIGNATURE OR SCRIPT TYPE");
+                    return false;
+                }
+            },
+            _ => return false,
         }
 
         let asset = tx_out.value.clone().with_fixed_hash(tx_out_point);
@@ -207,47 +207,20 @@ pub fn tx_has_valid_create_script(script: &Script, asset: &Asset) -> bool {
 /// * `outpoint_hash`   - Hash of the corresponding outpoint
 /// * `tx_out_pub_key`  - Public key of the previous tx_out
 // TODO: The last two operands should be converted to the corresponding types
-fn tx_has_valid_p2pkh_sig(script: &Script, outpoint_hash: &str, tx_out_pub_key: &str) -> bool {
-    let mut it = script.stack.iter();
+fn tx_has_valid_p2pkh_sig(tx_in: &P2PKHTxIn, outpoint_hash: &str, tx_out_pub_key: &str) -> bool {
+    // For legacy reasons, the hashed data is the hex representation of the data rather than
+    // the data itself.
+    let h_hex = hex::encode(sha3_256::digest(tx_in.public_key.as_ref()));
+    let b_hex = hex::encode(tx_in.check_data.as_slice());
 
-    debug!("script: {:?}", script.stack);
-
-    if let (
-        Some(StackEntry::Bytes(b)),
-        Some(StackEntry::Signature(_)),
-        Some(StackEntry::PubKey(_)),
-        Some(StackEntry::Op(OpCodes::OP_DUP)),
-        Some(StackEntry::Op(OpCodes::OP_HASH256)),
-        Some(StackEntry::Bytes(h)),
-        Some(StackEntry::Op(OpCodes::OP_EQUALVERIFY)),
-        Some(StackEntry::Op(OpCodes::OP_CHECKSIG)),
-        None,
-    ) = (
-        it.next(),
-        it.next(),
-        it.next(),
-        it.next(),
-        it.next(),
-        it.next(),
-        it.next(),
-        it.next(),
-        it.next(),
-    ) {
-        debug!("b: {:?}, h: {:?}", b, h);
-
-        // For legacy reasons, the hashed data is the hex representation of the data rather than
-        // the data itself.
-        let h_hex = hex::encode(h);
-        let b_hex = hex::encode(b);
-
-        if h_hex == tx_out_pub_key && b_hex == outpoint_hash && script.interpret() {
-            return true;
-        }
+    if h_hex == tx_out_pub_key && b_hex == outpoint_hash
+        && sign_ed25519::verify_detached(&tx_in.signature, b_hex.as_bytes(), &tx_in.public_key) {
+        return true;
     }
 
     trace!(
         "Invalid P2PKH script: {:?} tx_out_pub_key: {}",
-        script.stack,
+        tx_in,
         tx_out_pub_key
     );
 
@@ -308,6 +281,7 @@ mod tests {
     use crate::primitives::asset::Asset;
     use crate::primitives::druid::DdeValues;
     use crate::primitives::transaction::OutPoint;
+    use crate::utils::PlaceholderSeed;
     use crate::utils::test_utils::generate_tx_with_ins_and_outs_assets;
     use crate::utils::transaction_utils::*;
 
@@ -2606,7 +2580,8 @@ mod tests {
     }
 
     /// Util function to create p2pkh TxIns
-    fn create_multisig_tx_ins(tx_values: &[(OutPoint, &[Signature], &[PublicKey])], m: usize) -> Vec<TxIn> {
+    // TODO: jrabil: implement multisig
+    /*fn create_multisig_tx_ins(tx_values: &[(OutPoint, &[Signature], &[PublicKey])], m: usize) -> Vec<TxIn> {
         tx_values.iter()
             .map(|(previous_out, signatures, pub_keys)| {
                 let mut new_tx_in = TxIn::new();
@@ -2621,10 +2596,11 @@ mod tests {
                 new_tx_in
             })
             .collect()
-    }
+    }*/
 
     /// Util function to create multisig member TxIns
-    fn create_multisig_member_tx_ins(tx_values: &[(OutPoint, Signature, PublicKey)]) -> Vec<TxIn> {
+    // TODO: jrabil: implement multisig
+    /*fn create_multisig_member_tx_ins(tx_values: &[(OutPoint, Signature, PublicKey)]) -> Vec<TxIn> {
         tx_values.iter()
             .map(|(previous_out, signature, pub_key)| {
                 let mut new_tx_in = TxIn::new();
@@ -2637,7 +2613,7 @@ mod tests {
                 new_tx_in
             })
             .collect()
-    }
+    }*/
 
     #[test]
     /// Checks that a correct create script is validated as such
@@ -2675,7 +2651,8 @@ mod tests {
         assert!(!address_has_valid_length(&hex::encode([0; 64])));
     }
 
-    #[test]
+    // TODO: jrabil: implement multisig
+    /*#[test]
     /// Checks that correct member multisig scripts are validated as such
     fn test_pass_member_multisig_valid() {
         let (pk, sk) = sign::gen_keypair();
@@ -2702,7 +2679,7 @@ mod tests {
         let tx_ins = create_multisig_member_tx_ins(&[tx_const]);
 
         assert!(!&tx_ins[0].clone().script_signature.interpret());
-    }
+    }*/
 
     #[test]
     /// Checks that correct p2pkh transaction signatures are validated as such
@@ -2724,7 +2701,10 @@ mod tests {
         let tx_out_pk = construct_address(&pk);
 
         assert!(tx_has_valid_p2pkh_sig(
-            &tx_ins[0].script_signature,
+            match &tx_ins[0] {
+                TxIn::P2PKH(tx_in) => tx_in,
+                tx_in => panic!("Expected P2PKH: {:?}", tx_in),
+            },
             &hash_to_sign,
             &tx_out_pk
         ));
@@ -2753,65 +2733,17 @@ mod tests {
         let tx_out_pk = construct_address(&second_pk);
 
         assert!(!tx_has_valid_p2pkh_sig(
-            &tx_ins[0].script_signature,
+            match &tx_ins[0] {
+                TxIn::P2PKH(tx_in) => tx_in,
+                tx_in => panic!("Expected P2PKH: {:?}", tx_in),
+            },
             &hash_to_sign,
             &tx_out_pk
         ));
     }
 
-    #[test]
-    /// Checks that invalid p2pkh transaction signatures are validated as such
-    fn test_fail_p2pkh_sig_script_empty() {
-        let (pk, sk) = sign::gen_keypair();
-        let outpoint = OutPoint {
-            t_hash: hex::encode(vec![0, 0, 0]),
-            n: 0,
-        };
-
-        let hash_to_sign = construct_tx_in_signable_hash(&outpoint);
-
-        let tx_ins = [TxIn {
-            previous_out: Some(outpoint),
-            script_signature: Script::new(),
-        }];
-
-        let tx_out_pk = construct_address(&pk);
-
-        assert!(!tx_has_valid_p2pkh_sig(
-            &tx_ins[0].script_signature,
-            &hash_to_sign,
-            &tx_out_pk
-        ));
-    }
-
-    #[test]
-    /// Checks that invalid p2pkh transaction signatures are validated as such
-    fn test_fail_p2pkh_sig_script_invalid_struct() {
-        let (pk, sk) = sign::gen_keypair();
-        let outpoint = OutPoint {
-            t_hash: hex::encode(vec![0, 0, 0]),
-            n: 0,
-        };
-
-        let hash_to_sign = construct_tx_in_signable_hash(&outpoint);
-
-        let tx_ins = [TxIn {
-            previous_out: Some(outpoint),
-            script_signature: Script::from(vec![
-                StackEntry::Bytes(vec![]),
-            ]),
-        }];
-
-        let tx_out_pk = construct_address(&pk);
-
-        assert!(!tx_has_valid_p2pkh_sig(
-            &tx_ins[0].script_signature,
-            &hash_to_sign,
-            &tx_out_pk
-        ));
-    }
-
-    #[test]
+    // TODO: jrabil: implement multisig
+    /*#[test]
     /// Checks that correct multisig validation signatures are validated as such
     fn test_pass_multisig_validation_valid() {
         let (first_pk, first_sk) = sign::gen_keypair();
@@ -2828,7 +2760,7 @@ mod tests {
         ], m);
 
         assert!(&tx_ins[0].script_signature.interpret());
-    }
+    }*/
 
     #[test]
     /// Validate tx_is_valid for multiple TxIn configurations
@@ -2859,62 +2791,76 @@ mod tests {
         //
         // Arrange
         //
-        let (pk, sk) = sign::gen_keypair();
-        let tx_hash = hex::encode(vec![0, 0, 0]);
-        let tx_outpoint = OutPoint::new(tx_hash, 0);
+        let (pk, sk) = PlaceholderSeed::placeholder_indexed(0);
         let script_public_key = construct_address(&pk);
         let tx_in_previous_out =
-            TxOut::new_token_amount(script_public_key.clone(), TokenAmount(5), locktime);
+            TxOut::new_token_amount(script_public_key, TokenAmount(5), locktime);
         let ongoing_tx_outs = vec![tx_in_previous_out.clone()];
 
-        let valid_bytes = construct_tx_in_out_signable_hash(&tx_outpoint, &ongoing_tx_outs);
+        let valid_tx_outpoint = OutPoint::new("valid".to_string(), 0); //OutPoint::placeholder_indexed(0);
+        let valid_bytes = construct_tx_in_out_signable_hash(
+            &valid_tx_outpoint, &ongoing_tx_outs);
         let valid_sig = sign::sign_detached(valid_bytes.as_bytes(), &sk);
 
+        let invalid_tx_outpoint = OutPoint::new("invalid".to_string(), 0); //OutPoint::placeholder_indexed(1);
+        let invalid_bytes = construct_tx_in_out_signable_hash(
+            &invalid_tx_outpoint, &ongoing_tx_outs);
+        let invalid_sig = sign::sign_detached(invalid_bytes.as_bytes(), &sk);
+
         // Test cases:
-        let inputs = vec![
+        let inputs = [
             // 0. Happy case: valid test
             (
-                vec![
-                    StackEntry::Bytes(hex::decode(valid_bytes).unwrap()),
-                    StackEntry::Signature(valid_sig),
-                    StackEntry::PubKey(pk),
-                    StackEntry::Op(OpCodes::OP_DUP),
-                    StackEntry::Op(op_hash256),
-                    StackEntry::Bytes(hex::decode(script_public_key).unwrap()),
-                    StackEntry::Op(OpCodes::OP_EQUALVERIFY),
-                    StackEntry::Op(OpCodes::OP_CHECKSIG),
-                ],
+                TxIn::P2PKH(P2PKHTxIn {
+                    previous_out: valid_tx_outpoint.clone(),
+                    public_key: pk.clone(),
+                    signature: valid_sig.clone(),
+                    check_data: hex::decode(valid_bytes.clone()).unwrap(),
+                }),
                 true,
             ),
-            // 2. Empty script
-            (vec![StackEntry::Bytes("".as_bytes().to_vec())], false),
+            // 1. Signature doesn't match outpoint
+            (
+                TxIn::P2PKH(P2PKHTxIn {
+                    previous_out: valid_tx_outpoint.clone(),
+                    public_key: pk.clone(),
+                    signature: invalid_sig.clone(),
+                    check_data: hex::decode(invalid_bytes).unwrap(),
+                }),
+                false,
+            ),
+            // 2. Signature doesn't match outpoint
+            (
+                TxIn::P2PKH(P2PKHTxIn {
+                    previous_out: invalid_tx_outpoint.clone(),
+                    public_key: pk.clone(),
+                    signature: valid_sig.clone(),
+                    check_data: hex::decode(valid_bytes).unwrap(),
+                }),
+                false,
+            ),
         ];
 
         //
         // Act
         //
-        let mut actual_result = Vec::new();
-        for (script, _) in &inputs {
-            let tx_ins = vec![TxIn {
-                script_signature: Script {
-                    stack: script.clone(),
-                },
-                previous_out: Some(tx_outpoint.clone()),
-            }];
+        let actual_result = inputs.each_ref().map(|(tx_in, _)| {
+            let tx_ins = vec![tx_in.clone()];
 
             let tx = Transaction {
+                version: NETWORK_VERSION as usize,
                 inputs: tx_ins,
                 outputs: ongoing_tx_outs.clone(),
-                ..Default::default()
+                fees: vec![],
+                druid_info: None,
             };
 
-            let result = tx_is_valid(&tx, 500000000, |v| {
-                Some(&tx_in_previous_out).filter(|_| v == &tx_outpoint)
-            });
-            actual_result.push(result);
-        }
+            tx_is_valid(&tx, 500000000, |v| {
+                Some(&tx_in_previous_out).filter(|_| v == &valid_tx_outpoint)
+            })
+        });
 
-        actual_result == inputs.iter().map(|(_, e)| *e).collect::<Vec<bool>>()
+        actual_result == inputs.map(|(_, e)| e)
     }
 
     #[test]
@@ -3076,7 +3022,8 @@ mod tests {
         assert_eq!(actual_result, expected_result);
     }
 
-    #[test]
+    // TODO: jrabil: implement multisig
+    /*#[test]
     /// Checks that incorrect member interpret scripts are validated as such
     fn test_fail_interpret_valid() {
         let (_pk, sk) = sign::gen_keypair();
@@ -3103,5 +3050,5 @@ mod tests {
         let tx_ins = create_multisig_member_tx_ins(&[tx_const]);
 
         assert!(&tx_ins[0].clone().script_signature.interpret());
-    }
+    }*/
 }

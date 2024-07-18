@@ -149,13 +149,23 @@ pub fn get_script_signable_string(stack: &[StackEntry]) -> String {
 ///
 /// * `tx_in`   - TxIn value
 pub fn get_tx_in_address_signable_string(tx_in: &TxIn) -> String {
-    let out_point_signable_string = match &tx_in.previous_out {
-        Some(out_point) => get_out_point_signable_string(out_point),
-        None => "null".to_owned(),
-    };
-    let script_signable_string = get_script_signable_string(&tx_in.script_signature.stack);
-    debug!("Formatted string: {out_point_signable_string}-{script_signable_string}");
-    format!("{out_point_signable_string}-{script_signable_string}")
+    match tx_in {
+        TxIn::Coinbase(CoinbaseTxIn { block_number }) =>
+            format!("null-Num:{}", block_number),
+        TxIn::Create(CreateTxIn { block_number, asset_hash, signature, public_key }) =>
+            format!("null-Op:OP_CREATE-Num:{}-Op:OP_DROP-Bytes:{}-Signature:{}-PubKey:{}-Op:OP_CHECKSIG",
+                    block_number,
+                    hex::encode(asset_hash),
+                    hex::encode(signature.as_ref()),
+                    hex::encode(public_key.as_ref())),
+        TxIn::P2PKH(p2pkh) =>
+            format!("{}-Bytes:{}-Signature:{}-PubKey:{}-Op:OP_DUP-Op:OP_HASH256-Bytes:{}-Op:OP_EQUALVERIFY-Op:OP_CHECKSIG",
+                    get_out_point_signable_string(&p2pkh.previous_out),
+                    hex::encode(p2pkh.check_data.as_slice()),
+                    hex::encode(p2pkh.signature.as_ref()),
+                    hex::encode(p2pkh.public_key.as_ref()),
+                    hex::encode(sha3_256::digest(p2pkh.public_key.as_ref()))),
+    }
 }
 
 /// Constructs address for a TxIn collection
@@ -183,7 +193,7 @@ pub fn get_inputs_previous_out_point<'a>(
     utxo_entries
         .filter(|tx| !tx.is_create_tx())
         .flat_map(|val| val.inputs.iter())
-        .map(|input| input.previous_out.as_ref().unwrap())
+        .map(|input| input.find_previous_out().unwrap())
 }
 
 /// Get all the OutPoint and Transaction from the (hash,transactions)
@@ -301,13 +311,15 @@ pub fn construct_create_tx_in(
     asset: &Asset,
     public_key: PublicKey,
     secret_key: &SecretKey,
-) -> TxIn {
+) -> CreateTxIn {
     let asset_hash = construct_tx_in_signable_asset_hash(asset);
     let signature = sign::sign_detached(asset_hash.as_bytes(), secret_key);
 
-    TxIn {
-        previous_out: None,
-        script_signature: Script::new_create_asset(block_num, asset_hash, signature, public_key),
+    CreateTxIn {
+        block_number: block_num,
+        asset_hash: hex::decode(asset_hash).unwrap(),
+        public_key,
+        signature,
     }
 }
 
@@ -333,7 +345,9 @@ pub fn construct_item_create_tx(
     let asset = Asset::item(amount, genesis_hash, metadata);
     let receiver_address = construct_address(&public_key);
 
-    let tx_ins = vec![construct_create_tx_in(block_num, &asset, public_key, secret_key)];
+    let tx_ins = vec![
+        construct_create_tx_in(block_num, &asset, public_key, secret_key).wrap(),
+    ];
     let tx_out = TxOut {
         value: asset,
         script_public_key: Some(receiver_address),
@@ -517,21 +531,20 @@ fn construct_tx_in(
     tx_outs: &[TxOut],
 ) -> TxIn {
     match *ctor {
-        TxInConstructor::Coinbase { .. } => todo!("Coinbase"),
+        TxInConstructor::Coinbase { block_number } =>
+            TxIn::Coinbase(CoinbaseTxIn { block_number }),
         TxInConstructor::Create { block_number, asset, public_key, secret_key } =>
-            construct_create_tx_in(block_number, asset, *public_key, secret_key),
+            construct_create_tx_in(block_number, asset, *public_key, secret_key).wrap(),
         TxInConstructor::P2PKH { previous_out, public_key, secret_key } => {
             let signable_hash = construct_tx_in_out_signable_hash(previous_out, tx_outs);
             let signature = sign_ed25519::sign_detached(signable_hash.as_bytes(), secret_key);
 
-            TxIn {
-                previous_out: Some(previous_out.clone()),
-                script_signature: Script::pay2pkh(
-                    hex::decode(&signable_hash).unwrap(),
-                    signature,
-                    *public_key,
-                ),
-            }
+            TxIn::P2PKH(P2PKHTxIn {
+                previous_out: previous_out.clone(),
+                public_key: *public_key,
+                signature,
+                check_data: hex::decode(signable_hash).unwrap(),
+            })
         }
     }
 }
@@ -1223,10 +1236,14 @@ mod tests {
                     Signature::from_slice(hex::decode(signatures[n]).unwrap().as_ref()).unwrap();
                 let pk = PublicKey::from_slice(hex::decode(pub_keys[n]).unwrap().as_ref()).unwrap();
 
-                let script = Script::pay2pkh(hex::decode(&sig_data).unwrap(), sig, pk);
                 let out_p = previous_out_points[n].clone();
 
-                TxIn::new_from_input(out_p, script)
+                TxIn::P2PKH(P2PKHTxIn {
+                    previous_out: out_p,
+                    public_key: pk,
+                    signature: sig,
+                    check_data: hex::decode(sig_data).unwrap(),
+                })
             })
             .collect();
 

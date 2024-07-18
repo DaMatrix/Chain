@@ -83,55 +83,99 @@ pub enum TxInConstructor<'a> {
     },
 }
 
-/// An input of a transaction. It contains the location of the previous
-/// transaction's output that it claims and a signature that matches the
-/// output's public key.
-#[derive(Clone, Debug, Eq, PartialEq, Encode, Decode)]
-pub struct TxIn {
-    pub previous_out: Option<OutPoint>,
-    pub script_signature: Script,
+/// A Coinbase transaction input.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Encode, Decode)]
+pub struct CoinbaseTxIn {
+    pub block_number: u64,
 }
 
-impl Default for TxIn {
-    fn default() -> Self {
-        Self::new()
+impl CoinbaseTxIn {
+    /// Wraps this `CoinbaseTxIn` into a `TxIn`
+    pub fn wrap(self) -> TxIn {
+        TxIn::Coinbase(self)
     }
+}
+
+/*#[cfg(test)]
+impl crate::utils::Placeholder for CoinbaseTxIn {
+    fn placeholder() -> Self {
+        Self { block_number: 0 }
+    }
+}*/
+
+/// An asset creation transaction input.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Encode, Decode)]
+pub struct CreateTxIn {
+    pub block_number: u64,
+    pub asset_hash: Vec<u8>, // TODO: use a fixed-length type? // TODO: should we even keep this?
+    pub public_key: PublicKey,
+    pub signature: Signature,
+}
+
+impl CreateTxIn {
+    /// Wraps this `CreateTxIn` into a `TxIn`
+    pub fn wrap(self) -> TxIn {
+        TxIn::Create(self)
+    }
+}
+
+
+/*#[cfg(test)]
+impl crate::utils::Placeholder for CreateTxIn {
+    fn placeholder() -> Self {
+        Self {
+            block_number: 0,
+            asset_hash: vec![],
+            public_key: crate::utils::Placeholder::placeholder(),
+            signature: crate::utils::Placeholder::placeholder(),
+        }
+    }
+}*/
+
+/// A P2PKH redeem transaction input.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Encode, Decode)]
+pub struct P2PKHTxIn {
+    pub previous_out: OutPoint,
+    pub public_key: PublicKey,
+    pub signature: Signature,
+    pub check_data: Vec<u8>, // TODO: this can be inferred automatically
+}
+
+impl P2PKHTxIn {
+    /// Wraps this `P2PKHTxIn` into a `TxIn`
+    pub fn wrap(self) -> TxIn {
+        TxIn::P2PKH(self)
+    }
+}
+
+/*#[cfg(test)]
+impl crate::utils::Placeholder for P2PKHTxIn {
+    fn placeholder() -> Self {
+        Self {
+            previous_out: OutPoint::new(Default::default(), 0),
+            public_key: crate::utils::Placeholder::placeholder(),
+            signature: crate::utils::Placeholder::placeholder(),
+        }
+    }
+}*/
+
+/// A generic transaction input.
+/// This can any of the supported kinds of transaction inputs.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Encode, Decode)]
+pub enum TxIn {
+    Coinbase(CoinbaseTxIn),
+    Create(CreateTxIn),
+    P2PKH(P2PKHTxIn),
 }
 
 impl TxIn {
-    /// Creates a new TxIn instance
-    pub fn new() -> TxIn {
-        let mut script_sig = Script::new();
-        script_sig.stack.push(StackEntry::Op(OpCodes::OP_0));
-
-        TxIn {
-            previous_out: None,
-            script_signature: script_sig,
-        }
-    }
-
-    /// Creates a new TxIn instance from provided script and no previous_out
-    ///
-    /// ### Arguments
-    ///
-    /// * `script_sig`      - Script signature of the previous outpoint
-    pub fn new_from_script(script_sig: Script) -> TxIn {
-        TxIn {
-            previous_out: None,
-            script_signature: script_sig,
-        }
-    }
-
-    /// Creates a new TxIn instance from provided inputs
-    ///
-    /// ### Arguments
-    ///
-    /// * `previous_out`    - OutPoint of the previous transaction
-    /// * `script_sig`      - Script signature of the previous outpoint
-    pub fn new_from_input(previous_out: OutPoint, script_sig: Script) -> TxIn {
-        TxIn {
-            previous_out: Some(previous_out),
-            script_signature: script_sig,
+    /// If this TxIn redeems a previous transaction output, gets the `OutPoint` referencing the
+    /// redeemed transaction.
+    pub fn find_previous_out(&self) -> Option<&OutPoint> {
+        match self {
+            TxIn::Coinbase(_) => None,
+            TxIn::Create(_) => None,
+            TxIn::P2PKH(p2pkh) => Some(&p2pkh.previous_out),
         }
     }
 }
@@ -217,7 +261,7 @@ impl Transaction {
     /// Gets the create asset assigned to this transaction, if it exists
     fn get_create_asset(&self) -> Option<&Asset> {
         let is_create = self.inputs.len() == 1
-            && self.inputs[0].previous_out.is_none()
+            && self.inputs[0].find_previous_out().is_none()
             && self.outputs.len() == 1;
 
         is_create.then(|| &self.outputs[0].value)
