@@ -13,8 +13,9 @@ pub enum StackEntry {
     Op(OpCodes),
     Signature(Signature),
     PubKey(PublicKey),
+    // TODO: This should probably be u64, as usize doesn't have a consistent range on all platforms
     Num(usize),
-    Bytes(String),
+    Bytes(Vec<u8>),
 }
 
 /// Opcodes enum
@@ -109,8 +110,6 @@ pub enum OpCodes {
     // crypto
     OP_SHA3 = 0x90,
     OP_HASH256 = 0x91,
-    OP_HASH256_V0 = 0x92,
-    OP_HASH256_TEMP = 0x93,
     OP_CHECKSIG = 0x94,
     OP_CHECKSIGVERIFY = 0x95,
     OP_CHECKMULTISIG = 0x96,
@@ -128,6 +127,8 @@ pub enum OpCodes {
     OP_NOP8 = 0xb7,
     OP_NOP9 = 0xb8,
     OP_NOP10 = 0xb9,
+    OP_NOP11 = 0x92, // Formerly OP_HASH256_V0
+    OP_NOP12 = 0x93, // Formerly OP_HASH256_TEMP
 }
 
 impl OpCodes {

@@ -1,6 +1,6 @@
 #![allow(unused)]
 use crate::constants::*;
-use crate::crypto::sign_ed25519::{PublicKey, Signature};
+use crate::crypto::sign_ed25519::{PublicKey, SecretKey, Signature};
 use crate::primitives::{
     asset::{Asset, ItemAsset, TokenAmount},
     druid::{DdeValues, DruidExpectation},
@@ -28,16 +28,6 @@ impl GenesisTxHashSpec {
     }
 }
 
-/// A user-friendly construction struct for a TxIn
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TxConstructor {
-    pub previous_out: OutPoint,
-    pub signatures: Vec<Signature>,
-    pub pub_keys: Vec<PublicKey>,
-    pub address_version: Option<u64>,
-}
-
 /// An outpoint - a combination of a transaction hash and an index n into its vout
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize, Encode, Decode)]
 #[serde(deny_unknown_fields)]
@@ -63,6 +53,34 @@ impl Default for OutPoint {
     fn default() -> Self {
         Self::new(String::new(), 0)
     }
+}
+
+/// A constructor for a `TxIn`.
+#[derive(Clone, Copy, Debug)]
+pub enum TxInConstructor<'a> {
+    /// A constructor for a coinbase input.
+    Coinbase {
+        /// The number of the block which was mined.
+        block_number: u64,
+    },
+    /// A constructor for an asset creation input.
+    // TODO: jrabil: this needs to be tweaked a bit (e.g. we're still missing the GenesisHashSpec)
+    Create {
+        /// The block number which the asset was created at.
+        block_number: u64,
+        asset: &'a Asset,
+        public_key: &'a PublicKey,
+        secret_key: &'a SecretKey,
+    },
+    /// A constructor for a P2PKH input.
+    P2PKH {
+        /// The `OutPoint` being redeemed.
+        previous_out: &'a OutPoint,
+        /// The spender's public key.
+        public_key: &'a PublicKey,
+        /// The spender's private key.
+        secret_key: &'a SecretKey,
+    },
 }
 
 /// An input of a transaction. It contains the location of the previous
