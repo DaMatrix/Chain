@@ -1,7 +1,8 @@
 use crate::primitives::transaction::OutPoint;
-use crate::utils::{add_btreemap, format_for_display};
+use crate::utils::{add_btreemap, format_for_display, is_valid_amount};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fmt, iter, mem::size_of, ops};
+use tracing::debug;
 
 /// A structure representing the amount of tokens in an instance
 #[derive(Deserialize, Serialize, Default, Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
@@ -243,6 +244,7 @@ impl Asset {
     pub fn get_excess(&self, rhs: &Asset) -> Option<Asset> {
         match (&self, &rhs) {
             (Asset::Token(lhs_tokens), Asset::Token(rhs_tokens)) => {
+                debug!("LHS tokens: {:?}, RHS tokens: {:?}", lhs_tokens, rhs_tokens);
                 if lhs_tokens > rhs_tokens {
                     Some(Asset::Token(*lhs_tokens - *rhs_tokens))
                 } else {
@@ -370,7 +372,14 @@ impl AssetValues {
     /// Add the `rhs` parameter to `self`
     pub fn update_add(&mut self, rhs: &Asset) {
         match rhs {
-            Asset::Token(tokens) => self.tokens += *tokens,
+            Asset::Token(tokens) => {
+                let add = self.tokens + *tokens;
+
+                match is_valid_amount(&add) {
+                    true => self.tokens += *tokens,
+                    false => self.tokens += TokenAmount::default(),
+                }
+            },
             Asset::Item(items) => {
                 if let Some(genesis_hash) = &items.genesis_hash {
                     self.items
