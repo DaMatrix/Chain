@@ -130,6 +130,27 @@ pub mod sign_ed25519 {
         Signature(signature)
     }
 
+    pub fn verify_append(sm: &[u8], pk: &PublicKey) -> bool {
+        if sm.len() > ED25519_SIGNATURE_LEN {
+            let start = sm.len() - ED25519_SIGNATURE_LEN;
+            let sig = Signature(match sm[start..].try_into() {
+                Ok(sig) => sig,
+                Err(_) => return false,
+            });
+            let msg = &sm[..start];
+            verify_detached(&sig, msg, pk)
+        } else {
+            false
+        }
+    }
+
+    pub fn sign_append(msg: &[u8], sk: &SecretKey) -> Vec<u8> {
+        let sig = sign_detached(msg, sk);
+        let mut sm = msg.to_vec();
+        sm.extend_from_slice(sig.as_ref());
+        sm
+    }
+
     /// Generates a completely random Ed25519 keypair.
     pub fn gen_keypair() -> (PublicKey, SecretKey) {
         let seed = generate_secure_random();
