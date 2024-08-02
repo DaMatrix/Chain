@@ -131,8 +131,13 @@ impl TxOut {
         amount: TokenAmount,
         locktime: Option<u64>,
     ) -> TxOut {
+        let value = match is_valid_amount(&amount) {
+            true => Asset::Token(amount),
+            false => Asset::Token(TokenAmount::default()),
+        };
+
         TxOut {
-            value: Asset::Token(amount),
+            value,
             locktime: locktime.unwrap_or(ZERO as u64),
             script_public_key: to_address,
         }
@@ -217,5 +222,19 @@ impl Transaction {
         self.get_create_asset()
             .map(|a| !a.is_token())
             .unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::primitives::asset::{Asset, TokenAmount};
+    use crate::primitives::transaction::TxOut;
+
+    #[test]
+    fn test_overflow_tx_out() {
+        let amount = TokenAmount(u64::MAX);
+        let tx_out = TxOut::new_token_amount("test".to_string(), amount, None);
+
+        assert_eq!(tx_out.value, Asset::Token(TokenAmount::default()));
     }
 }
