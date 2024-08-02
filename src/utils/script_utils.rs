@@ -2910,7 +2910,7 @@ mod tests {
         let tx_out = TxOut {
             value: Asset::Token(TokenAmount(0)),
             locktime: 0,
-            script_public_key: Some("".to_string()),
+            script_public_key: Placeholder::placeholder(),
         };
 
         tx.outputs.push(tx_out);

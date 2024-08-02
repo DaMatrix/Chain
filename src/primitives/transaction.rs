@@ -229,11 +229,12 @@ impl Transaction {
 mod tests {
     use crate::primitives::asset::{Asset, TokenAmount};
     use crate::primitives::transaction::TxOut;
+    use crate::utils::Placeholder;
 
     #[test]
     fn test_overflow_tx_out() {
         let amount = TokenAmount(u64::MAX);
-        let tx_out = TxOut::new_token_amount("test".to_string(), amount, None);
+        let tx_out = TxOut::new_token_amount(Placeholder::placeholder(), amount, None);
 
         assert_eq!(tx_out.value, Asset::Token(TokenAmount::default()));
     }
